@@ -1,0 +1,25 @@
+{
+  "name": "ultraorm",
+  "version": "1.0.0",
+  "description": "A javascript object relational mapper ",
+  "homepage": "https://github.com/minjaezekiel/ultraORM#readme",
+  "bugs": {
+    "url": "https://github.com/minjaezekiel/ultraORM/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/minjaezekiel/ultraORM.git"
+  },
+  "license": "MIT",
+  "author": "Ezekiel Minja",
+  "type": "commonjs",
+  "main": "ultraORM.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "mongodb": "^6.20.0",
+    "mysql2": "^3.15.0",
+    "pg": "^8.16.3"
+  }
+}
