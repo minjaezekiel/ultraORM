@@ -686,7 +686,7 @@ await progress.save();
 npm install pg mysql2 mongodb
 
 # Clone or create your project
-git clone https://github.com/AsseySilivestir/orm-.git
+git clone https://github.com/minjaezekiel/ultraORM.git
 cd orm-
 
 # Configure database
