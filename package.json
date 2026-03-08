@@ -15,7 +15,11 @@
   "type": "commonjs",
   "main": "ultraORM.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node quickstart.js",
+    "migrate:create": "node core/ultra-orm-migrator.js create",
+    "migrate:up": "node core/ultra-orm-migrator.js up",
+    "migrate:rollback": "node core/ultra-orm-migrator.js rollback",
+    "migrate:status": "node core/ultra-orm-migrator.js status"
   },
   "dependencies": {
     "mongodb": "^6.20.0",

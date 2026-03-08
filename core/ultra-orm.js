@@ -1,4 +1,4 @@
-//by LightOne Dev
+//By Ezekiel Minja
 // ultra-orm.js
 const { Pool } = require('pg');
 const mysql = require('mysql2/promise');
