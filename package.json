@@ -1,5 +1,5 @@
 {
-  "name": "ultra-orm",
+  "name": "ultraorm",
   "version": "1.0.1",
   "description": "devs first  opt write once  run  everywhere",
   "main": "bootstrap-orm.js",
