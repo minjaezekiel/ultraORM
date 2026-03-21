@@ -1,12 +1,16 @@
 {
   "name": "ultra-orm",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "devs first  opt write once  run  everywhere",
   "main": "bootstrap-orm.js",
-  "scripts": {
-   
-  },
-  "keywords": ["orm", "postgres", "mysql", "mongodb","ultraorm"],
+  "scripts": {},
+  "keywords": [
+    "orm",
+    "postgres",
+    "mysql",
+    "mongodb",
+    "ultraorm"
+  ],
   "author": "silivestir  assey,ezekiel minja",
   "license": "MIT",
   "dependencies": {
