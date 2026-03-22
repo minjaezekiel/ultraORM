@@ -34,20 +34,21 @@ app.post('/register', async (req, res) => {
       return res.send('<h1>Error: Email already registered!</h1><a href="/">Go back</a>');
     }
 
-    // B. Create new user using ORM
-    // In a real app, you would hash 'password' with bcrypt here
+   
     const newUser = await orm.user.create({
       name: name,
+      
       email: email,
       password: password 
     });
 
-    console.log('User created:', newUser.toJSON());
-
+    // console.log('User created:', newUser.toJSON());
+    const userId = await orm.user.findOne({"id":1})
+  console.log("its  not  fine",userId)
     res.send(`
       <h1>Registration Successful!</h1>
       <p>Welcome, ${newUser.get('name')}!</p>
-      <p>Your ID: ${newUser.id}</p>
+      <p>Your ID: ${userId.data.id}</p>
       <a href="/">Register another</a>
     `);
 
