@@ -1,22 +1,63 @@
 {
   "name": "ultraorm",
-  "version": "1.0.1",
-  "description": "devs first  opt write once  run  everywhere",
+  "version": "2.0.0",
+  "description": "The Ultimate Node.js ORM - Write once, run anywhere. PostgreSQL, MySQL, MongoDB support with Django-like ease",
   "main": "bootstrap-orm.js",
-  "scripts": {},
+  "module": "ultra-orm.js",
+  "types": "ultra-orm.d.ts",
+  "scripts": {
+    "test": "node tests/full_test.js",
+    "migrate": "node -e \"require('./bootstrap-orm').migrate()\"",
+    "migrate:make": "node -e \"require('./bootstrap-orm').makeMigration(process.argv[2])\"",
+    "migrate:run": "node -e \"require('./bootstrap-orm').migrateRun()\"",
+    "migrate:rollback": "node -e \"require('./bootstrap-orm').migrateRollback()\"",
+    "migrate:reset": "node -e \"require('./bootstrap-orm').migrateReset()\"",
+    "migrate:refresh": "node -e \"require('./bootstrap-orm').migrateRefresh()\"",
+    "seed": "node -e \"require('./bootstrap-orm').seed()\"",
+    "seed:make": "node -e \"require('./bootstrap-orm').makeSeeder(process.argv[2])\"",
+    "seed:refresh": "node -e \"require('./bootstrap-orm').seedRefresh()\"",
+    "db:connect": "node -e \"require('./bootstrap-orm').connect()\"",
+    "db:disconnect": "node -e \"require('./bootstrap-orm').disconnect()\"",
+    "lint": "eslint core.js bootstrap-orm.js ultra-orm.js",
+    "docs": "jsdoc -d docs core.js"
+  },
   "keywords": [
     "orm",
+    "database",
     "postgres",
+    "postgresql",
     "mysql",
     "mongodb",
-    "ultraorm"
+    "mongo",
+    "model",
+    "query",
+    "migration",
+    "seeder",
+    "relationships",
+    "activerecord"
   ],
-  "author": "silivestir  assey,ezekiel minja",
+  "author": "Silivestir Assey, Ezekiel Minja",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/ultraorm"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/ultraorm/issues"
+  },
+  "homepage": "https://github.com/yourusername/ultraorm#readme",
+  "peerDependencies": {},
   "dependencies": {
     "dotenv": "^16.0.0",
-    "pg": "^8.x",
-    "mysql2": "^3.x",
-    "mongodb": "^5.x"
+    "pg": "^8.11.0",
+    "mysql2": "^3.6.0",
+    "mongodb": "^5.9.0"
+  },
+  "devDependencies": {
+    "jsdoc": "^4.0.0",
+    "eslint": "^8.50.0"
+  },
+  "engines": {
+    "node": ">=14.0.0"
   }
 }
