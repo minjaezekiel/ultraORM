@@ -1,188 +1,879 @@
 # UltraORM - The Ultimate Node.js ORM
 
-<p align="center">
-  <strong>Write Once, Run Anywhere</strong><br>
-  <em>PostgreSQL • MySQL • MongoDB</em>
-</p>
+![Version](https://img.shields.io/badge/version-2.0.0-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Node](https://img.shields.io/badge/node-%3E%3D14.0.0-brightgreen)
 
-<p align="center">
-  <a href="https://www.npmjs.com/package/ultraorm">
-    <img src="https://img.shields.io/npm/v/ultraorm.svg" alt="npm version">
-  </a>
-  <a href="https://www.npmjs.com/package/ultraorm">
-    <img src="https://img.shields.io/npm/dm/ultraorm.svg" alt="npm downloads">
-  </a>
-  <a href="https://github.com/yourusername/ultraorm/blob/main/LICENSE">
-    <img src="https://img.shields.io/npm/l/ultraorm.svg" alt="license">
-  </a>
-</p>
-
----
+**UltraORM** is a powerful, type-safe, and database-agnostic Object-Relational Mapping (ORM) library for Node.js. It provides a unified API for working with PostgreSQL, MySQL, and MongoDB databases while maintaining Django-like ease of use.
 
 ## Table of Contents
 
-- [What is UltraORM?](#what-is-ultraorm)
 - [Features](#features)
-- [Quick Start](#quick-start)
 - [Installation](#installation)
+- [Quick Start](#quick-start)
 - [Configuration](#configuration)
 - [Field Types](#field-types)
-- [Query Methods](#query-methods)
-- [Model Methods](#model-methods)
+- [Model Definition](#model-definition)
+- [QuerySet Operations](#queryset-operations)
 - [Relationships](#relationships)
-- [Migrations](#migrations)
-- [Seeders](#seeders)
 - [Transactions](#transactions)
-- [Data Transfer](#data-transfer)
+- [Migrations](#migrations)
+- [Blog Project Example](#blog-project-example)
 - [API Reference](#api-reference)
+- [Error Handling](#error-handling)
 - [Best Practices](#best-practices)
+- [Roadmap](#roadmap)
 - [Contributing](#contributing)
 - [License](#license)
 
 ---
 
-## What is UltraORM?
+## Features
 
-UltraORM is a comprehensive, multi-database Object-Relational Mapping library for Node.js that provides an elegant, intuitive interface for database interactions. It combines the best features from popular ORMs like Django ORM, Sequelize, and Prisma while adding unique capabilities.
-
-### Key Philosophy
-
-- **Write Once, Run Anywhere**: Define your models once and work with PostgreSQL, MySQL, or MongoDB
-- **Django-like Ease**: Familiar patterns for developers coming from Django
-- **Performance First**: Optimized queries with connection pooling and eager loading
-- **Production Ready**: Full error handling, validation, and comprehensive logging
+- **Multi-Database Support**: PostgreSQL, MySQL, and MongoDB
+- **Type-Safe**: Full TypeScript support with field types
+- **Django-Like API**: Familiar patterns for Django/Python developers
+- **Relationship Support**: hasMany, belongsTo, belongsToMany, polymorphic relations
+- **Transaction Support**: ACID transactions with deadlock retry
+- **Migration System**: Built-in migration management
+- **Query Builder**: Chainable, powerful query builder
+- **Validation**: Built-in field validation
+- **SQL Injection Protection**: Automatic identifier escaping
+- **Singleton ORM**: Easy global access pattern
 
 ---
 
-## Features
+## Installation
 
-### Database Support
-- ✅ PostgreSQL
-- ✅ MySQL
-- ✅ MongoDB
+### Prerequisites
 
-### Field Types
-- ✅ All standard SQL types (INT, VARCHAR, TEXT, BOOLEAN, etc.)
-- ✅ UUID with auto-generation
-- ✅ Enum fields
-- ✅ JSON fields with validation
-- ✅ Date/Time fields with auto timestamps
-- ✅ Foreign keys with cascade options
-- ✅ One-to-One fields
-- ✅ MoneyField with currency support and precision handling
+- Node.js >= 14.0.0
+- npm or yarn
+- A database server (PostgreSQL, MySQL, or MongoDB)
 
-### Query Builder
-- ✅ Chainable QuerySet API
-- ✅ All comparison operators (=, !=, >, <, >=, <=)
-- ✅ LIKE/ILIKE pattern matching
-- ✅ IN/NOT IN clauses
-- ✅ BETWEEN clauses
-- ✅ NULL checks
-- ✅ OR conditions
-- ✅ GROUP BY & HAVING
-- ✅ DISTINCT selection
-- ✅ Pagination
-- ✅ Aggregation (SUM, AVG, MIN, MAX, COUNT)
+### Install UltraORM
 
-### Relationships
-- ✅ One-to-One
-- ✅ One-to-Many
-- ✅ Many-to-Many (with pivot table)
-- ✅ Many-to-Many with attach/detach/sync methods
-- ✅ Has-Many-Through
-- ✅ Self-referential
-- ✅ Polymorphic (morphMany, morphOne)
-- ✅ Polymorphic Many-to-Many
+```bash
+# Using npm
+npm install ultraorm
 
-### Database Operations
-- ✅ Auto-sync tables
-- ✅ Migration system with versioning
-- ✅ Seeder system
-- ✅ Transaction support
-- ✅ Data transfer between databases
-- ✅ Schema cloning
+# Using yarn
+yarn add ultraorm
 
-### Performance
-- ✅ Connection pooling
-- ✅ Eager loading (N+1 prevention)
-- ✅ Batch operations
-- ✅ Raw query support
-- ✅ Query optimization
+# Using pnpm
+pnpm add ultraorm
+```
+
+### Install Database Drivers
+
+```bash
+# PostgreSQL
+npm install pg
+
+# MySQL
+npm install mysql2
+
+# MongoDB
+npm install mongodb
+```
 
 ---
 
 ## Quick Start
 
-### 1. Install
+### Basic Setup
 
-```bash
-npm install ultraorm
+```javascript
+const { UltraORM, Model, StringField, IntegerField, DateTimeField } = require('ultraorm');
+
+// Create ORM instance
+const orm = new UltraORM({
+  type: 'postgres',
+  host: 'localhost',
+  database: 'myapp',
+  user: 'admin',
+  password: 'secret'
+});
+
+// Define a model
+class User extends Model {
+  static tableName = 'users';
+  static fields = {
+    id: new IntegerField({ primaryKey: true, autoIncrement: true }),
+    name: new StringField({ maxLength: 100, nullable: false }),
+    email: new StringField({ unique: true, nullable: false }),
+    createdAt: new DateTimeField({ autoNowAdd: true })
+  };
+}
+
+// Register model
+orm.registerModel(User);
+
+// Connect and sync
+async function main() {
+  await orm.connect();
+  await orm.migrate();
+  
+  // Create a user
+  const user = await User.create({ name: 'John Doe', email: 'john@example.com' });
+  console.log(user.data);
+  
+  await orm.disconnect();
+}
+
+main();
 ```
 
-### 2. Configure Environment
+---
+
+## Configuration
+
+### Environment Variables
 
 Create a `.env` file in your project root:
 
 ```env
 DB_TYPE=postgres
 DB_HOST=localhost
-DB_USER=your_username
-DB_PASSWORD=your_password
-DB_NAME=your_database
 DB_PORT=5432
+DB_USER=admin
+DB_PASSWORD=secret
+DB_NAME=myapp
+DB_POOL_SIZE=10
 ```
 
-### 3. Create a Model
+### Configuration Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `type` | string | `'postgres'` | Database type: `'postgres'`, `'mysql'`, `'mongodb'` |
+| `host` | string | `'localhost'` | Database host |
+| `port` | number | `5432/3306/27017` | Database port |
+| `database` | string | required | Database name |
+| `user` | string | required | Database user |
+| `password` | string | required | Database password |
+| `url` | string | - | MongoDB connection URL |
+| `poolSize` | number | `20` | Connection pool size |
+| `idleTimeoutMillis` | number | `30000` | Idle timeout in ms |
+| `connectionTimeoutMillis` | number | `5000` | Connection timeout in ms |
+
+### Using Bootstrap
 
 ```javascript
-// models/User.js
-const { Model, StringField, IntegerField, EmailField, DateTimeField, BooleanField } = require('ultraorm');
+// Load from bootstrap (reads .env automatically)
+const orm = require('ultraorm/bootstrap');
+
+// Or import specific components
+const { Model, StringField, IntegerField } = require('ultraorm/bootstrap');
+```
+
+---
+
+## Field Types
+
+### Numeric Fields
+
+#### IntegerField
+```javascript
+new IntegerField({
+  min: 0,
+  max: 100,
+  unsigned: false
+})
+```
+
+#### BigIntegerField
+```javascript
+new BigIntegerField({ unsigned: true })
+```
+
+#### SmallIntegerField
+```javascript
+new SmallIntegerField({ min: -32768, max: 32767 })
+```
+
+#### TinyIntegerField
+```javascript
+new TinyIntegerField({ min: 0, max: 255 })
+```
+
+#### DecimalField
+```javascript
+new DecimalField({
+  precision: 10,   // Total digits
+  scale: 2         // Decimal places
+})
+```
+
+#### FloatField
+```javascript
+new FloatField({ min: 0, max: 100 })
+```
+
+#### MoneyField
+```javascript
+new MoneyField({
+  currency: 'USD',
+  minValue: 0,
+  maxValue: 1000000,
+  storeAsCents: true  // Store as integer cents
+})
+```
+
+### String Fields
+
+#### StringField
+```javascript
+new StringField({
+  maxLength: 255,
+  minLength: 1,
+  pattern: /^[a-z]+$/,
+  trim: true
+})
+```
+
+#### CharField
+```javascript
+new CharField({ maxLength: 100 })  // Default maxLength: 255
+```
+
+#### TextField
+```javascript
+new TextField()              // TEXT
+new TextField({ medium: true })  // MEDIUMTEXT
+new TextField({ long: true })   // LONGTEXT
+```
+
+#### EmailField
+```javascript
+new EmailField({ unique: true })
+```
+
+#### SlugField
+```javascript
+new SlugField({ maxLength: 100 })
+```
+
+#### URLField
+```javascript
+new URLField({ maxLength: 2048 })
+```
+
+#### UUIDField
+```javascript
+new UUIDField({ default: () => crypto.randomUUID() })
+```
+
+### Date/Time Fields
+
+#### DateField
+```javascript
+new DateField()
+```
+
+#### TimeField
+```javascript
+new TimeField()
+```
+
+#### DateTimeField
+```javascript
+new DateTimeField({
+  autoNow: true,      // Update on every save
+  autoNowAdd: true,   // Only on creation
+  timezone: 'UTC',
+  useTz: false
+})
+```
+
+### Other Fields
+
+#### BooleanField
+```javascript
+new BooleanField({ default: false })
+```
+
+#### JSONField
+```javascript
+new JSONField({ default: {} })
+```
+
+#### BinaryField
+```javascript
+new BinaryField({ maxLength: 1024 })
+```
+
+#### EnumField
+```javascript
+new EnumField({
+  values: ['active', 'inactive', 'pending'],
+  name: 'status_type'
+})
+```
+
+#### ForeignKey
+```javascript
+new ForeignKey(User, {
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE',
+  nullable: false
+})
+```
+
+#### OneToOneField
+```javascript
+new OneToOneField(User, { onDelete: 'CASCADE' })
+```
+
+### Field Options
+
+All fields support these options:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `primaryKey` | boolean | `false` | Set as primary key |
+| `unique` | boolean | `false` | Unique constraint |
+| `nullable` | boolean | `true` | Allow NULL values |
+| `default` | * | - | Default value or function |
+| `autoIncrement` | boolean | `false` | Auto-increment |
+| `dbType` | string | - | Custom database type |
+| `index` | boolean | `false` | Create index |
+| `description` | string | - | Field description |
+
+---
+
+## Model Definition
+
+### Basic Model
+
+```javascript
+const { Model, StringField, IntegerField, DateTimeField } = require('ultraorm');
 
 class User extends Model {
   static tableName = 'users';
-  
   static fields = {
     id: new IntegerField({ primaryKey: true, autoIncrement: true }),
     name: new StringField({ maxLength: 100, nullable: false }),
-    email: new EmailField({ unique: true, nullable: false }),
+    email: new StringField({ unique: true, nullable: false }),
+    createdAt: new DateTimeField({ autoNowAdd: true })
+  };
+}
+```
+
+### CRUD Operations
+
+```javascript
+// Create
+const user = await User.create({ name: 'John', email: 'john@example.com' });
+
+// Read
+const user = await User.findOne({ email: 'john@example.com' });
+const user = await User.findById(1);
+const users = await User.find({ isActive: true });
+
+// Update
+user.name = 'Jane';
+await user.save();
+
+// Or update directly
+await User.query().where({ id: 1 }).update({ name: 'Jane' });
+
+// Delete
+await user.delete();
+// Or
+await User.query().where({ id: 1 }).delete();
+```
+
+---
+
+## QuerySet Operations
+
+The QuerySet provides a chainable, powerful query builder.
+
+### Where Conditions
+
+```javascript
+// Simple equality
+await User.query().where({ status: 'active' }).get();
+
+// Comparison operators
+await User.query()
+  .where({ age: { $gt: 18 } })
+  .where({ age: { $lte: 65 } })
+  .get();
+
+// Multiple conditions
+await User.query().where({ status: 'active', country: 'USA' }).get();
+
+// OR conditions
+await User.query()
+  .where({ status: 'active' })
+  .orWhere({ status: 'pending' })
+  .get();
+```
+
+### Available Operators
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `$eq` | Equal | `{ field: { $eq: value } }` |
+| `$ne` | Not equal | `{ field: { $ne: value } }` |
+| `$gt` | Greater than | `{ field: { $gt: 10 } }` |
+| `$gte` | Greater than or equal | `{ field: { $gte: 10 } }` |
+| `$lt` | Less than | `{ field: { $lt: 10 } }` |
+| `$lte` | Less than or equal | `{ field: { $lte: 10 } }` |
+| `$in` | In array | `{ field: { $in: [1, 2, 3] } }` |
+| `$notIn` | Not in array | `{ field: { $notIn: [1, 2] } }` |
+| `$isNull` | Is NULL | `{ field: { $isNull: true } }` |
+| `$isNotNull` | Is not NULL | `{ field: { $isNotNull: true } }` |
+| `$like` | LIKE pattern | `{ field: { $like: '%test%' } }` |
+| `$contains` | Contains (LIKE %value%) | `{ field: { $contains: 'test' } }` |
+| `$startsWith` | Starts with | `{ field: { $startsWith: 'test' } }` |
+| `$endsWith` | Ends with | `{ field: { $endsWith: 'test' } }` |
+| `$between` | Between range | `{ field: { $between: [1, 10] } }` |
+
+### Query Methods
+
+```javascript
+// Order by
+await User.query().order('createdAt', 'DESC').get();
+await User.query().orderBy('name', 'ASC').get();
+await User.query().orderByMultiple(['name ASC', 'age DESC']).get();
+
+// Limit and offset
+await User.query().take(10).get();
+await User.query().limit(10).get();
+await User.query().skip(20).take(10).get();
+await User.query().offset(20).limit(10).get();
+
+// Select specific fields
+await User.query().select('id', 'name', 'email').get();
+
+// Distinct
+await User.query().distinct().get();
+await User.query().distinct('status').get();
+
+// Pagination
+const { items, pagination } = await User.query().paginate(2, 20);
+// pagination: { page, perPage, total, totalPages, hasNext, hasPrev }
+```
+
+### Aggregation
+
+```javascript
+// Count
+const count = await User.query().count();
+
+// Aggregate methods
+const total = await User.query().sum('balance');
+const avgAge = await User.query().avg('age');
+const oldest = await User.query().min('age');
+const youngest = await User.query().max('age');
+
+// Check existence
+const exists = await User.query().where({ email }).exists();
+
+// First record
+const user = await User.query().first();
+const user = await User.query().firstOrFail('User not found');
+```
+
+### Bulk Operations
+
+```javascript
+// Update multiple records
+await User.query()
+  .where({ status: 'inactive' })
+  .update({ status: 'archived' });
+
+// Delete multiple records
+await User.query()
+  .where({ deletedAt: { $isNotNull: true } })
+  .delete();
+
+// Increment/Decrement
+await Post.query().where({ id: 1 }).increment('viewCount');
+await Post.query().where({ id: 1 }).increment('count', 5);
+await Post.query().where({ id: 1 }).decrement('stock');
+```
+
+---
+
+## Relationships
+
+### BelongsTo
+
+```javascript
+// Post belongs to User
+class Post extends Model {
+  static tableName = 'posts';
+  static fields = {
+    id: new IntegerField({ primaryKey: true }),
+    title: new StringField(),
+    userId: new ForeignKey(User)
+  };
+}
+
+Post.belongsTo(User, { foreignKey: 'userId', as: 'author' });
+
+// Usage
+const posts = await Post.query().include('author').get();
+console.log(posts[0].author.name);
+```
+
+### HasMany
+
+```javascript
+// User has many Posts
+User.hasMany(Post, { foreignKey: 'userId', as: 'posts' });
+
+// Usage
+const user = await User.findById(1);
+const posts = await Post.query()
+  .where({ userId: user.id })
+  .get();
+```
+
+### HasOne
+
+```javascript
+// User has one Profile
+User.hasOne(Profile, { foreignKey: 'userId', as: 'profile' });
+
+// Usage
+const user = await User.findById(1);
+const profile = await Profile.findOne({ userId: user.id });
+```
+
+### BelongsToMany (Many-to-Many)
+
+```javascript
+// User belongs to many Roles through UserRole
+User.belongsToMany(Role, { through: UserRole, as: 'roles' });
+
+// Junction table model
+class UserRole extends Model {
+  static tableName = 'user_roles';
+  static fields = {
+    userId: new ForeignKey(User),
+    roleId: new ForeignKey(Role)
+  };
+}
+
+// Usage
+const user = await User.findById(1);
+await user.attach('roles', [1, 2, 3]);  // Attach roles
+await user.detach('roles', [2]);         // Detach role
+await user.sync('roles', [1, 3]);       // Replace all roles
+await user.toggle('roles', [4]);         // Toggle role
+const hasRole = await user.hasAttached('roles', 1);  // Check attachment
+```
+
+### Polymorphic Relations
+
+```javascript
+// Image belongs to any model (Post, User, etc.)
+class Image extends Model {
+  static tableName = 'images';
+  static fields = {
+    id: new IntegerField({ primaryKey: true }),
+    url: new StringField(),
+    imageableType: new StringField(),
+    imageableId: new IntegerField()
+  };
+}
+
+Image.morphTo({ as: 'imageable' });
+
+// Post has many Images
+Post.morphMany(Image, { morphName: 'imageable', as: 'images' });
+
+// Usage
+const post = await Post.findById(1);
+const images = post.images;
+```
+
+### Self-Referential
+
+```javascript
+// Category has parent and children
+Category.belongsToSelf({ as: 'parent', childrenAs: 'children' });
+```
+
+---
+
+## Transactions
+
+```javascript
+// Basic transaction
+const result = await orm.transaction(async (client) => {
+  const user = await User.create({ name: 'John', email: 'john@example.com' });
+  await Profile.create({ userId: user.id, bio: 'Hello!' });
+  return user;
+});
+
+// Transaction with options
+const result = await orm.transaction(async (client) => {
+  // Your operations
+  return result;
+}, {
+  maxRetries: 5,           // Deadlock retry attempts
+  retryDelay: 100,         // Delay between retries (ms)
+  isolationLevel: 'SERIALIZABLE',
+  lockTimeout: 10,         // Lock timeout (seconds)
+  statementTimeout: 30000   // Statement timeout (ms)
+});
+
+// PostgreSQL advisory locks
+await client.advisoryLock(12345);
+try {
+  // Your critical section
+} finally {
+  await client.advisoryUnlock(12345);
+}
+```
+
+---
+
+## Migrations
+
+### Run Migrations
+
+```javascript
+// Sync all models (simple)
+await orm.migrate();
+
+// Create migration file
+await orm.makeMigration('add-users-table');
+
+// Run pending migrations
+await orm.migrateRun();
+
+// Rollback last migration
+await orm.migrateRollback();
+
+// Reset all migrations
+await orm.migrateReset();
+
+// Refresh migrations
+await orm.migrateRefresh();
+```
+
+### Manual Migration
+
+```javascript
+// migrations/20240101_add_status.js
+module.exports = {
+  async up(orm) {
+    await orm.adapter.execute(`
+      ALTER TABLE users ADD COLUMN status VARCHAR(50) DEFAULT 'active'
+    `);
+  },
+  async down(orm) {
+    await orm.adapter.execute(`
+      ALTER TABLE users DROP COLUMN status
+    `);
+  }
+};
+```
+
+---
+
+## Blog Project Example
+
+A complete blog project with Users, Posts, Categories, Tags, and Comments.
+
+### Project Structure
+
+```
+blog-project/
+├── models/
+│   ├── User.js
+│   ├── Post.js
+│   ├── Category.js
+│   ├── Tag.js
+│   ├── Comment.js
+│   └── PostTag.js
+├── server.js
+└── .env
+```
+
+### Models
+
+```javascript
+// models/User.js
+const { Model, StringField, IntegerField, DateTimeField, BooleanField, ForeignKey, OneToOneField } = require('ultraorm');
+
+class User extends Model {
+  static tableName = 'users';
+  static fields = {
+    id: new IntegerField({ primaryKey: true, autoIncrement: true }),
+    name: new StringField({ maxLength: 100, nullable: false }),
+    email: new StringField({ unique: true, nullable: false }),
+    password: new StringField({ nullable: false }),
     isActive: new BooleanField({ default: true }),
     createdAt: new DateTimeField({ autoNowAdd: true }),
     updatedAt: new DateTimeField({ autoNow: true })
   };
 }
 
+User.hasMany(Post, { foreignKey: 'authorId', as: 'posts' });
+User.hasMany(Comment, { foreignKey: 'authorId', as: 'comments' });
+
 module.exports = User;
 ```
 
-### 4. Connect and Query
+```javascript
+// models/Post.js
+const { Model, StringField, IntegerField, TextField, DateTimeField, ForeignKey } = require('ultraorm');
+
+class Post extends Model {
+  static tableName = 'posts';
+  static fields = {
+    id: new IntegerField({ primaryKey: true, autoIncrement: true }),
+    title: new StringField({ maxLength: 200, nullable: false }),
+    slug: new StringField({ unique: true, maxLength: 220 }),
+    content: new TextField({ nullable: false }),
+    excerpt: new TextField(),
+    authorId: new ForeignKey(User, { nullable: false }),
+    categoryId: new ForeignKey(Category, { nullable: true }),
+    publishedAt: new DateTimeField({ nullable: true }),
+    createdAt: new DateTimeField({ autoNowAdd: true }),
+    updatedAt: new DateTimeField({ autoNow: true })
+  };
+}
+
+Post.belongsTo(User, { foreignKey: 'authorId', as: 'author' });
+Post.belongsTo(Category, { foreignKey: 'categoryId', as: 'category' });
+Post.hasMany(Comment, { foreignKey: 'postId', as: 'comments' });
+Post.belongsToMany(Tag, { through: PostTag, as: 'tags' });
+Post.morphMany(Comment, { morphName: 'commentable', as: 'comments' });
+
+module.exports = Post;
+```
 
 ```javascript
-// app.js
+// models/Category.js
+const { Model, StringField, IntegerField, ForeignKey } = require('ultraorm');
+
+class Category extends Model {
+  static tableName = 'categories';
+  static fields = {
+    id: new IntegerField({ primaryKey: true, autoIncrement: true }),
+    name: new StringField({ maxLength: 100, unique: true, nullable: false }),
+    slug: new StringField({ unique: true, maxLength: 110 }),
+    parentId: new ForeignKey(Category, { nullable: true })
+  };
+}
+
+Category.belongsToSelf({ as: 'parent', childrenAs: 'children' });
+Category.hasMany(Post, { foreignKey: 'categoryId', as: 'posts' });
+
+module.exports = Category;
+```
+
+```javascript
+// models/Tag.js
+const { Model, StringField } = require('ultraorm');
+
+class Tag extends Model {
+  static tableName = 'tags';
+  static fields = {
+    id: new IntegerField({ primaryKey: true, autoIncrement: true }),
+    name: new StringField({ maxLength: 50, unique: true, nullable: false }),
+    slug: new StringField({ unique: true, maxLength: 60 })
+  };
+}
+
+Tag.belongsToMany(Post, { through: PostTag, as: 'posts' });
+
+module.exports = Tag;
+```
+
+```javascript
+// models/Comment.js
+const { Model, StringField, IntegerField, TextField, DateTimeField, ForeignKey } = require('ultraorm');
+
+class Comment extends Model {
+  static tableName = 'comments';
+  static fields = {
+    id: new IntegerField({ primaryKey: true, autoIncrement: true }),
+    content: new TextField({ nullable: false }),
+    authorId: new ForeignKey(User, { nullable: false }),
+    postId: new ForeignKey(Post, { nullable: true }),
+    commentableType: new StringField(),
+    commentableId: new IntegerField(),
+    parentId: new ForeignKey(Comment, { nullable: true }),
+    createdAt: new DateTimeField({ autoNowAdd: true })
+  };
+}
+
+Comment.belongsTo(User, { foreignKey: 'authorId', as: 'author' });
+Comment.belongsToSelf({ as: 'parent', childrenAs: 'replies' });
+Comment.morphTo({ as: 'commentable' });
+
+module.exports = Comment;
+```
+
+### Server Setup
+
+```javascript
+// server.js
+require('dotenv').config();
 const orm = require('ultraorm/bootstrap');
+const User = require('./models/User');
+const Post = require('./models/Post');
+const Category = require('./models/Category');
+const Tag = require('./models/Tag');
+const Comment = require('./models/Comment');
 
 async function main() {
-  // Connect to database
   await orm.connect();
-  
-  // Run migrations
   await orm.migrate();
   
-  // Create a user
-  const user = await orm.User.create({
+  // Create sample data
+  const author = await User.create({
     name: 'John Doe',
-    email: 'john@example.com'
+    email: 'john@example.com',
+    password: 'hashed_password'
   });
   
-  // Query users
-  const activeUsers = await orm.User.query()
-    .where({ isActive: true })
+  const category = await Category.create({ name: 'Technology', slug: 'technology' });
+  
+  const post = await Post.create({
+    title: 'Getting Started with UltraORM',
+    slug: 'getting-started-ultraorm',
+    content: 'UltraORM is amazing...',
+    authorId: author.id,
+    categoryId: category.id
+  });
+  
+  // Create and attach tags
+  const tag1 = await Tag.create({ name: 'Node.js', slug: 'nodejs' });
+  const tag2 = await Tag.create({ name: 'ORM', slug: 'orm' });
+  await post.attach('tags', [tag1.id, tag2.id]);
+  
+  // Create comment
+  await Comment.create({
+    content: 'Great article!',
+    authorId: author.id,
+    postId: post.id
+  });
+  
+  // Query examples
+  const posts = await Post.query()
+    .where({ publishedAt: { $isNotNull: true } })
     .order('createdAt', 'DESC')
     .take(10)
+    .include('author', 'category', 'tags')
     .get();
   
-  console.log(`Found ${activeUsers.length} active users`);
+  const postWithComments = await Post.findById(post.id);
+  const comments = await Comment.query()
+    .where({ postId: post.id })
+    .include('author')
+    .get();
   
-  // Disconnect
   await orm.disconnect();
 }
 
@@ -191,1182 +882,268 @@ main().catch(console.error);
 
 ---
 
-## Installation
-
-### npm
-
-```bash
-npm install ultraorm
-```
-
-### yarn
-
-```bash
-yarn add ultraorm
-```
-
-### Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DB_TYPE` | Database type (`postgres`, `mysql`, `mongodb`) | `postgres` |
-| `DB_HOST` | Database host | `localhost` |
-| `DB_PORT` | Database port | `5432` (postgres), `3306` (mysql), `27017` (mongodb) |
-| `DB_USER` | Database user | - |
-| `DB_PASSWORD` | Database password | - |
-| `DB_NAME` | Database name | - |
-| `DB_URL` | MongoDB connection URL (alternative) | - |
-| `DB_POOL_SIZE` | Connection pool size | 10-20 |
-| `DB_IDLE_TIMEOUT` | Idle timeout in ms | 30000 |
-| `DB_CONNECTION_TIMEOUT` | Connection timeout in ms | 5000 |
-
----
-
-## Configuration
-
-### PostgreSQL Configuration
-
-```javascript
-const { UltraORM } = require('ultraorm');
-
-const orm = new UltraORM({
-  type: 'postgres',
-  host: 'localhost',
-  port: 5432,
-  user: 'username',
-  password: 'password',
-  database: 'mydb',
-  poolSize: 20,
-  idleTimeoutMillis: 30000
-});
-```
-
-### MySQL Configuration
-
-```javascript
-const orm = new UltraORM({
-  type: 'mysql',
-  host: 'localhost',
-  port: 3306,
-  user: 'username',
-  password: 'password',
-  database: 'mydb',
-  poolSize: 10
-});
-```
-
-### MongoDB Configuration
-
-```javascript
-const orm = new UltraORM({
-  type: 'mongodb',
-  url: 'mongodb://localhost:27017',
-  database: 'mydb'
-});
-```
-
----
-
-## Field Types
-
-### Available Field Types
-
-| Field Type | Description | Database Type |
-|------------|-------------|---------------|
-| `IntegerField` | Integer values | INT |
-| `BigIntegerField` | Large integers | BIGINT |
-| `SmallIntegerField` | Small integers | SMALLINT |
-| `TinyIntegerField` | Tiny integers (0-255) | TINYINT |
-| `DecimalField` | Precise decimals | DECIMAL(precision,scale) |
-| `FloatField` | Floating-point | FLOAT |
-| `StringField` | Variable strings | VARCHAR(maxLength) |
-| `CharField` | Fixed/variable strings | VARCHAR(255) |
-| `TextField` | Long text | TEXT |
-| `EmailField` | Email with validation | VARCHAR(255) |
-| `SlugField` | URL-friendly slugs | VARCHAR(maxLength) |
-| `URLField` | URLs with validation | VARCHAR(2048) |
-| `UUIDField` | UUID values | CHAR(36) |
-| `EnumField` | Enum values | ENUM |
-| `DateField` | Date only | DATE |
-| `TimeField` | Time only | TIME |
-| `DateTimeField` | Date and time | TIMESTAMP |
-| `BooleanField` | True/false | BOOLEAN |
-| `JSONField` | JSON data | JSON |
-| `BinaryField` | Binary data | BLOB |
-| `ForeignKey` | Foreign key | INT |
-| `OneToOneField` | One-to-one | INT |
-| `MoneyField` | Monetary values | BIGINT/DECIMAL |
-
-### Field Options
-
-All field types accept these options:
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `primaryKey` | boolean | false | Set as primary key |
-| `unique` | boolean | false | Unique constraint |
-| `nullable` | boolean | true | Allow NULL values |
-| `default` | * | null | Default value |
-| `autoIncrement` | boolean | false | Auto-increment |
-| `dbType` | string | null | Custom DB type |
-| `index` | boolean | false | Create index |
-| `validators` | array | [] | Custom validators |
-
-### Field Examples
-
-```javascript
-// Basic field
-new StringField({ nullable: false })
-
-// With validation
-new IntegerField({ min: 0, max: 100, default: 0 })
-
-// With pattern
-new StringField({ pattern: /^[a-z]+$/, maxLength: 50 })
-
-// Email field (auto-validates email format)
-new EmailField({ unique: true })
-
-// DateTime with auto-timestamps
-new DateTimeField({ autoNow: true })      // Updates on every save
-new DateTimeField({ autoNowAdd: true })  // Only on creation
-
-// Decimal for precise values (e.g., prices)
-new DecimalField({ precision: 10, scale: 2 }) // 12345678.90
-
-// Foreign key
-new ForeignKey(User, { onDelete: 'CASCADE' })
-
-// Enum
-new EnumField({ values: ['active', 'inactive', 'pending'] })
-
-// Money field (stores as cents internally for precision)
-new MoneyField({ currency: 'USD' })
-new MoneyField({ currency: 'EUR', minValue: 0, maxValue: 1000000 })
-new MoneyField({ currency: 'BTC', storeAsCents: false, precision: 20, scale: 8 })
-```
-
-### MoneyField & MoneyValue
-
-UltraORM provides dedicated support for monetary values with the `MoneyField` and `MoneyValue` classes:
-
-```javascript
-const { Model, MoneyField, MoneyValue } = require('ultraorm');
-
-class Product extends Model {
-  static tableName = 'products';
-  static fields = {
-    id: new IntegerField({ primaryKey: true }),
-    name: new StringField({ nullable: false }),
-    price: new MoneyField({ currency: 'USD', minValue: 0 }),
-    weight: new MoneyField({ currency: 'kg', storeAsCents: false, precision: 10, scale: 3 })
-  };
-}
-
-// Working with MoneyValue
-const price = new MoneyValue(19.99, 'USD');
-const total = price.add(new MoneyValue(5.00, 'USD'));
-console.log(total.format()); // '$24.99'
-
-// In models, values are automatically converted to MoneyValue
-const product = await Product.findOne({ id: 1 });
-const displayPrice = product.get('price').format(); // '$19.99'
-const amount = product.get('price').amount; // 19.99
-
-// Arithmetic operations
-const discount = new MoneyValue(5, 'USD');
-const finalPrice = price.subtract(discount);
-console.log(finalPrice.toCents()); // 1499 (in cents)
-```
-
-**MoneyField Options:**
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `currency` | string | 'USD' | Currency code (ISO 4217) |
-| `precision` | number | 19 | Total digits |
-| `scale` | number | 2 | Decimal places |
-| `minValue` | number | null | Minimum allowed value |
-| `maxValue` | number | null | Maximum allowed value |
-| `storeAsCents` | boolean | true | Store as integer cents |
-
-**MoneyValue Methods:**
-
-| Method | Description |
-|--------|-------------|
-| `add(other)` | Add another MoneyValue |
-| `subtract(other)` | Subtract another MoneyValue |
-| `multiply(factor)` | Multiply by a number |
-| `divide(divisor)` | Divide by a number |
-| `equals(other)` | Check equality |
-| `greaterThan(other)` | Compare greater than |
-| `lessThan(other)` | Compare less than |
-| `format(options)` | Format as currency string |
-| `toCents()` | Convert to integer cents |
-| `toJSON()` | Convert to object |
-
----
-
-## Query Methods
-
-### QuerySet API
-
-The `QuerySet` class provides a chainable interface for building complex queries.
-
-#### Basic Filtering
-
-```javascript
-// Simple equality
-await User.query().where({ status: 'active' }).get()
-
-// Greater than
-await User.query().where({ age: { $gt: 18 } }).get()
-
-// Multiple conditions
-await User.query()
-  .where({ status: 'active', age: { $gte: 18 } })
-  .get()
-
-// OR conditions
-await User.query()
-  .where({ status: 'active' })
-  .orWhere({ role: 'admin' })
-  .get()
-```
-
-#### Comparison Operators
-
-| Operator | Description | Example |
-|----------|-------------|---------|
-| `$eq` | Equal | `{ age: { $eq: 18 } }` |
-| `$ne` | Not equal | `{ status: { $ne: 'deleted' } }` |
-| `$gt` | Greater than | `{ age: { $gt: 18 } }` |
-| `$gte` | Greater or equal | `{ age: { $gte: 18 } }` |
-| `$lt` | Less than | `{ age: { $lt: 65 } }` |
-| `$lte` | Less or equal | `{ age: { $lte: 65 } }` |
-
-#### IN and BETWEEN
-
-```javascript
-// IN clause
-await User.query().whereIn('id', [1, 2, 3]).get()
-await User.query().where({ id: { $in: [1, 2, 3] } }).get()
-
-// NOT IN
-await User.query().whereNotIn('status', ['deleted', 'archived']).get()
-
-// BETWEEN
-await User.query().whereBetween('age', [18, 65]).get()
-await User.query().where({ age: { $between: [18, 65] } }).get()
-```
-
-#### NULL Checks
-
-```javascript
-// IS NULL
-await User.query().whereNull('deletedAt').get()
-
-// IS NOT NULL
-await User.query().whereNotNull('confirmedAt').get()
-```
-
-#### LIKE/Pattern Matching
-
-```javascript
-// LIKE (exact match pattern)
-await User.query().whereLike('name', '%John%').get()
-
-// NOT LIKE
-await User.query().whereNotLike('email', '%@spam.com').get()
-
-// Contains (wraps with %)
-await User.query().search('name', 'John').get()
-
-// Starts with
-await User.query().where({ name: { $startsWith: 'J' } }).get()
-
-// Ends with
-await User.query().where({ email: { $endsWith: '@company.com' } }).get()
-```
-
-#### Ordering
-
-```javascript
-// Ascending order
-await User.query().order('createdAt').get()
-
-// Descending order
-await User.query().order('createdAt', 'DESC').get()
-
-// Shorthand for descending
-await User.query().order('-createdAt').get()
-
-// Multiple fields
-await User.query()
-  .order('status')
-  .order('name', 'DESC')
-  .get()
-```
-
-#### Limiting and Offsetting
-
-```javascript
-// Limit results
-await User.query().take(10).get()
-await User.query().limit(10).get()
-
-// Skip (offset)
-await User.query().skip(20).get()
-await User.query().offset(20).get()
-
-// Paginate
-const { items, pagination } = await User.query().paginate(2, 20)
-// pagination: { page, perPage, total, totalPages, hasNext, hasPrev }
-```
-
-#### Selecting Fields
-
-```javascript
-// Select specific fields
-await User.query().select('id', 'name', 'email').get()
-
-// Distinct selection
-await User.query().distinct('status').get()
-```
-
-#### Grouping and Having
-
-```javascript
-// GROUP BY
-await User.query()
-  .groupBy('status')
-  .get()
-
-// GROUP BY with HAVING
-await User.query()
-  .groupBy('status')
-  .having('COUNT(*) > 5')
-  .get()
-```
-
-### Execution Methods
-
-```javascript
-// Get all results
-const users = await User.query().get()
-
-// Get first result
-const user = await User.query().where({ email }).first()
-
-// Get first or throw error
-const user = await User.query().where({ id: 1 }).firstOrFail('User not found')
-
-// Check if records exist
-const exists = await User.query().where({ email }).exists()
-
-// Count records
-const count = await User.query().where({ status: 'active' }).count()
-
-// Get only values (plain objects)
-const emails = await User.query().values('email')
-// [{ email: 'a@example.com' }, { email: 'b@example.com' }]
-
-// Get single value
-const email = await User.query().where({ id: 1 }).value('email')
-// 'user@example.com'
-```
-
-### Aggregation
-
-```javascript
-// Sum
-const total = await Order.query().sum('amount')
-
-// Average
-const avgAge = await User.query().avg('age')
-
-// Minimum
-const minPrice = await Product.query().min('price')
-
-// Maximum
-const maxPrice = await Product.query().max('price')
-
-// Count
-const count = await User.query().count()
-```
-
-### Bulk Operations
-
-```javascript
-// Bulk update
-await User.query()
-  .where({ status: 'inactive' })
-  .update({ status: 'archived' })
-
-// Bulk delete
-await User.query()
-  .where({ status: 'deleted' })
-  .delete()
-
-// Increment
-await Post.query()
-  .where({ id: 1 })
-  .increment('viewCount')
-
-// Decrement
-await Product.query()
-  .where({ id: 1 })
-  .decrement('stock')
-```
-
-### Eager Loading
-
-```javascript
-// Include single relation
-await Post.query().include('author').get()
-
-// Include multiple relations
-await Post.query().include(['author', 'comments']).get()
-
-// Nested eager loading
-await User.query().include({ posts: { include: 'comments' } }).get()
-```
-
----
-
-## Model Methods
-
-### Static Methods
-
-```javascript
-// Create a record
-const user = await User.create({ name: 'John', email: 'john@example.com' })
-
-// Find by ID
-const user = await User.findById(1)
-
-// Find one record
-const user = await User.findOne({ email: 'john@example.com' })
-
-// Find or fail
-const user = await User.findOrFail(1, 'User not found')
-
-// Find all records
-const users = await User.find({ status: 'active' })
-
-// Count records
-const count = await User.count({ status: 'active' })
-
-// Check if exists
-const exists = await User.exists({ email: 'john@example.com' })
-
-// First or create
-const user = await User.firstOrCreate(
-  { email: 'john@example.com' },
-  { name: 'John', password: 'hashed' }
-)
-
-// Update or create
-const user = await User.updateOrCreate(
-  { email: 'john@example.com' },
-  { lastLogin: new Date() }
-)
-
-// Bulk create
-const users = await User.bulkCreate([
-  { name: 'John', email: 'john@example.com' },
-  { name: 'Jane', email: 'jane@example.com' }
-])
-
-// Create query
-const qs = User.query()
-```
-
-### Instance Methods
-
-```javascript
-// Save (insert or update)
-const user = new User({ name: 'John', email: 'john@example.com' })
-await user.save()
-
-// Update and save
-user.name = 'Johnny'
-await user.save()
-
-// Delete
-await user.delete()
-await user.destroy() // Alias
-
-// Refresh from database
-await user.refresh()
-
-// Convert to JSON
-const json = user.toJSON()
-const obj = user.toObject()
-
-// Fill multiple fields
-user.fill({ name: 'Jane', status: 'active' })
-
-// Check if changed
-if (user.isDirty()) {
-  console.log('Changes:', user.getChanged())
-}
-
-// Get specific field
-const name = user.get('name')
-const name = user.name // Alternative
-
-// Set specific field
-user.set('name', 'Jane')
-user.name = 'Jane' // Alternative
-```
-
----
-
-## Relationships
-
-### One-to-One
-
-```javascript
-class User extends Model {
-  static tableName = 'users'
-  static fields = {
-    id: new IntegerField({ primaryKey: true }),
-    name: new StringField()
-  }
-}
-
-class Profile extends Model {
-  static tableName = 'profiles'
-  static fields = {
-    id: new IntegerField({ primaryKey: true }),
-    userId: new ForeignKey(User),
-    bio: new TextField()
-  }
-}
-
-// Define relationship
-User.hasOne(Profile, { foreignKey: 'userId', as: 'profile' })
-Profile.belongsTo(User, { foreignKey: 'userId', as: 'user' })
-
-// Usage
-const user = await User.query().include('profile').first()
-console.log(user.profile.bio)
-```
-
-### One-to-Many
-
-```javascript
-class User extends Model {
-  static tableName = 'users'
-  static fields = {
-    id: new IntegerField({ primaryKey: true }),
-    name: new StringField()
-  }
-}
-
-class Post extends Model {
-  static tableName = 'posts'
-  static fields = {
-    id: new IntegerField({ primaryKey: true }),
-    userId: new ForeignKey(User),
-    title: new StringField(),
-    content: new TextField()
-  }
-}
-
-// Define relationship
-User.hasMany(Post, { foreignKey: 'userId', as: 'posts' })
-Post.belongsTo(User, { foreignKey: 'userId', as: 'author' })
-
-// Usage
-const user = await User.query().include('posts').first()
-console.log(user.posts.length, 'posts')
-
-const post = await Post.query().include('author').first()
-console.log(post.author.name)
-```
-
-### Many-to-Many
-
-```javascript
-class User extends Model {
-  static tableName = 'users'
-  static fields = {
-    id: new IntegerField({ primaryKey: true }),
-    name: new StringField()
-  }
-}
-
-class Role extends Model {
-  static tableName = 'roles'
-  static fields = {
-    id: new IntegerField({ primaryKey: true }),
-    name: new StringField()
-  }
-}
-
-// Junction table
-class UserRole extends Model {
-  static tableName = 'user_roles'
-  static fields = {
-    id: new IntegerField({ primaryKey: true }),
-    userId: new ForeignKey(User),
-    roleId: new ForeignKey(Role),
-    assignedAt: new DateTimeField({ autoNowAdd: true })
-  }
-}
-
-// Define relationship
-User.belongsToMany(Role, { through: UserRole, as: 'roles' })
-Role.belongsToMany(User, { through: UserRole, as: 'users' })
-
-// Usage
-const user = await User.query().include('roles').first()
-console.log(user.roles.map(r => r.name))
-
-const role = await Role.query().include('users').first()
-console.log(role.users.map(u => u.name))
-```
-
-#### Many-to-Many Instance Methods
-
-UltraORM provides convenient methods for managing many-to-many relationships:
-
-```javascript
-// Assume user is a saved User instance with belongsToMany('roles')
-
-// Attach roles to user
-await user.attach('roles', [1, 2, 3]);
-await user.attach('roles', roleInstance); // Can also pass model instances
-
-// Attach with pivot data
-await user.attach('roles', [1, 2], { assignedAt: new Date() });
-
-// Attach with unique pivot data per record
-await user.attachWithPivot('roles', [
-  { id: 1, pivotData: { role: 'admin' } },
-  { id: 2, pivotData: { role: 'editor' } }
-]);
-
-// Detach roles from user
-await user.detach('roles', [1, 2]); // Detach specific roles
-await user.detach('roles'); // Detach all roles
-
-// Sync roles (replace all attachments)
-await user.sync('roles', [2, 3]); // Removes 1, keeps 2, adds 3
-
-// Toggle roles (attach if not attached, detach if attached)
-const { attached, detached } = await user.toggle('roles', [1, 2]);
-console.log(`Attached: ${attached}, Detached: ${detached}`);
-
-// Check if user has a role
-const hasAdmin = await user.hasAttached('roles', 1);
-console.log(`User is admin: ${hasAdmin}`);
-
-// Get pivot data for an attachment
-const pivot = await user.getPivot('roles', 1);
-console.log(`Role assigned at: ${pivot.assignedAt}`);
-
-// Update pivot data
-await user.updatePivot('roles', 1, { role: 'superadmin' });
-```
-
-#### Auto-create Junction Tables
-
-You can automatically create junction tables with extra fields:
-
-```javascript
-// Create junction table with extra fields
-await User.createJunctionTable('roles', {
-  assignedAt: new DateTimeField({ autoNowAdd: true }),
-  assignedBy: new IntegerField()
-});
-```
-
-| Method | Description |
-|--------|-------------|
-| `attach(relation, ids, pivotData)` | Attach related records |
-| `detach(relation, ids)` | Detach related records |
-| `sync(relation, ids, pivotData)` | Replace all attachments |
-| `toggle(relation, ids)` | Toggle attachment state |
-| `hasAttached(relation, id)` | Check if related record is attached |
-| `getPivot(relation, id)` | Get pivot data for attachment |
-| `updatePivot(relation, id, data)` | Update pivot data |
-| `attachWithPivot(relation, records)` | Attach with unique pivot data |
-
-### Has-Many-Through
-
-```javascript
-// Users have many Posts through Countries
-Country.hasManyThrough(Post, {
-  through: User,
-  foreignKey: 'countryId',
-  throughKey: 'id',
-  targetKey: 'userId',
-  as: 'posts'
-})
-
-// Usage
-const country = await Country.query().include('posts').first()
-console.log(country.posts)
-```
-
-### Self-Referential
-
-```javascript
-class Category extends Model {
-  static tableName = 'categories'
-  static fields = {
-    id: new IntegerField({ primaryKey: true }),
-    name: new StringField(),
-    parentId: new IntegerField({ nullable: true })
-  }
-}
-
-// Define relationship
-Category.belongsToSelf({ as: 'parent', childrenAs: 'children' })
-
-// Usage
-const electronics = await Category.query()
-  .where({ name: 'Electronics' })
-  .include('children')
-  .first()
-console.log(electronics.children)
-```
-
-### Polymorphic
-
-```javascript
-class Post extends Model {
-  static tableName = 'posts'
-  static fields = {
-    id: new IntegerField({ primaryKey: true }),
-    title: new StringField()
-  }
-}
-
-class Video extends Model {
-  static tableName = 'videos'
-  static fields = {
-    id: new IntegerField({ primaryKey: true }),
-    title: new StringField()
-  }
-}
-
-class Comment extends Model {
-  static tableName = 'comments'
-  static fields = {
-    id: new IntegerField({ primaryKey: true }),
-    content: new TextField(),
-    commentableType: new StringField(),
-    commentableId: new IntegerField()
-  }
-}
-
-// Define polymorphic
-Post.morphMany(Comment, { morphName: 'commentable', as: 'comments' })
-Video.morphMany(Comment, { morphName: 'commentable', as: 'comments' })
-Comment.morphTo({ as: 'commentable' })
-
-// Usage
-const post = await Post.query().include('comments').first()
-console.log(post.comments)
-```
-
----
-
-## Migrations
-
-UltraORM provides a complete migration system similar to Django.
-
-### Create Migration
-
-```bash
-npm run migrate:make create-users-table
-```
-
-This creates a migration file in the `migrations/` folder:
-
-```javascript
-module.exports = {
-  async up(orm) {
-    await orm.adapter.execute(`
-      CREATE TABLE IF NOT EXISTS users (
-        id SERIAL PRIMARY KEY,
-        name VARCHAR(255) NOT NULL,
-        email VARCHAR(255) UNIQUE NOT NULL
-      )
-    `);
-  },
-  
-  async down(orm) {
-    await orm.adapter.execute('DROP TABLE IF EXISTS users');
-  }
-};
-```
-
-### Run Migrations
-
-```bash
-npm run migrate:run
-```
-
-### Rollback Migration
-
-```bash
-npm run migrate:rollback
-```
-
-### Reset Migrations
-
-```bash
-npm run migrate:reset
-```
-
-### Refresh Migrations
-
-```bash
-npm run migrate:refresh
-```
-
-### Auto-Sync (Quick Alternative)
-
-For development, you can auto-sync models:
-
-```javascript
-await orm.migrate()  // Creates all tables
-```
-
----
-
-## Seeders
-
-### Create Seeder
-
-```bash
-npm run seed:make users
-```
-
-This creates a seeder file:
-
-```javascript
-module.exports = {
-  async run(orm) {
-    await orm.User.create({ name: 'Admin', email: 'admin@example.com', role: 'admin' });
-    await orm.User.create({ name: 'User', email: 'user@example.com', role: 'user' });
-  },
-  
-  async clean(orm) {
-    await orm.adapter.execute('DELETE FROM users WHERE email LIKE "%@example.com"');
-  }
-};
-```
-
-### Run Seeders
-
-```bash
-npm run seed
-```
-
-### Refresh Seeders
-
-```bash
-npm run seed:refresh
-```
-
----
-
-## Transactions
-
-### Basic Transaction
-
-```javascript
-const result = await orm.transaction(async (client) => {
-  const user = await orm.User.create({ name: 'John', email: 'john@example.com' });
-  await orm.Profile.create({ userId: user.id, bio: 'Hello' });
-  return user;
-});
-```
-
-### Transaction with Error Handling
-
-```javascript
-try {
-  await orm.transaction(async (client) => {
-    const user = await orm.User.create({ name: 'John', email: 'john@example.com' });
-    const order = await orm.Order.create({ userId: user.id, total: 100 });
-    
-    if (total > 1000) {
-      throw new Error('Order total too high');
-    }
-    
-    return { user, order };
-  });
-} catch (error) {
-  console.error('Transaction failed:', error.message);
-  // All changes are automatically rolled back
-}
-```
-
----
-
-## Data Transfer
-
-UltraORM can transfer data between databases while respecting your model schemas.
-
-### Transfer Data
-
-```javascript
-// Transfer data from PostgreSQL to MySQL
-const stats = await orm.transferTo({
-  type: 'mysql',
-  host: 'remote-host',
-  user: 'root',
-  password: 'password',
-  database: 'remotedb'
-}, {
-  tables: ['users', 'posts'],  // Optional: specify tables
-  batchSize: 1000,
-  clearTarget: false
-});
-
-console.log(stats);
-// { tables: { users: { rows: 100, status: 'success' }, ... }, totalRows: 500, errors: [] }
-```
-
-### Clone Structure
-
-```javascript
-// Clone database structure (without data)
-const stats = await orm.cloneStructure({
-  type: 'mysql',
-  host: 'remote-host',
-  user: 'root',
-  password: 'password',
-  database: 'remotedb'
-});
-```
-
----
-
 ## API Reference
 
-### UltraORM
+### UltraORM Class
 
 ```javascript
-const orm = new UltraORM(config)
+const orm = new UltraORM(config);
 
 // Connection
-await orm.connect()
-await orm.disconnect()
+await orm.connect();
+await orm.disconnect();
 
 // Model management
-orm.registerModel(User)
-orm.model('User')
+orm.registerModel(User);
+orm.model('users');  // Get model by table name
 
 // Migrations
-await orm.migrate()
-await orm.makeMigration('name')
-await orm.migrateRun()
-await orm.migrateRollback()
-await orm.migrateReset()
-await orm.migrateRefresh()
-
-// Seeders
-await orm.makeSeeder('name')
-await orm.seed()
-await orm.seedRefresh()
+await orm.migrate();
+await orm.migrateRun();
+await orm.migrateRollback();
+await orm.migrateReset();
 
 // Transactions
-await orm.transaction(async (client) => { ... })
+await orm.transaction(async (client) => { ... });
 
 // Utilities
-await orm.tableExists('users')
-await orm.getTables()
-await orm.truncate('users')
-await orm.dropTable('users')
-await orm.raw('NOW()')  // For raw expressions
+await orm.tableExists('users');
+await orm.getTables();
+await orm.truncate('users');
+orm.raw('NOW()');  // Raw SQL expression
+```
 
-// Data transfer
-await orm.transferTo(targetConfig, options)
-await orm.cloneStructure(targetConfig, options)
+### Model Class
+
+```javascript
+// Static methods
+User.create(data);           // Create and save
+User.find(where);             // Find all
+User.findOne(where);         // Find one
+User.findById(id);           // Find by ID
+User.findOrFail(id);         // Find or throw NotFoundError
+User.firstOrCreate(where, data);  // Find or create
+User.updateOrCreate(where, data);   // Update or create
+User.count(where);           // Count records
+User.exists(where);          // Check existence
+User.query();                // Create QuerySet
+User.sync();                 // Sync table
+User.bulkCreate(records);    // Bulk insert
+
+// Instance methods
+user.save();       // Insert or update
+user.delete();     // Delete record
+user.refresh();    // Reload from DB
+user.validate();   // Validate fields
+user.toJSON();     // Convert to JSON
+
+// Relationships
+user.posts;        // Get related (via eager load)
+await user.attach('roles', [1, 2]);
+await user.detach('roles', [1]);
+await user.sync('roles', [2, 3]);
+await user.toggle('roles', [1]);
 ```
 
 ### QuerySet Methods
 
-| Method | Description |
-|--------|-------------|
-| `where(conditions)` | Add WHERE conditions |
-| `orWhere(conditions)` | Add OR WHERE conditions |
-| `whereIn(field, values)` | WHERE field IN (...) |
-| `whereNotIn(field, values)` | WHERE field NOT IN (...) |
-| `whereNull(field)` | WHERE field IS NULL |
-| `whereNotNull(field)` | WHERE field IS NOT NULL |
-| `whereBetween(field, range)` | WHERE field BETWEEN x AND y |
-| `whereLike(field, pattern)` | WHERE field LIKE pattern |
-| `whereNotLike(field, pattern)` | WHERE field NOT LIKE pattern |
-| `search(field, value)` | WHERE field LIKE %value% |
-| `order(field, direction)` | ORDER BY field |
-| `limit(limit)` | LIMIT n |
-| `offset(offset)` | OFFSET n |
-| `take(limit)` | LIMIT n |
-| `skip(offset)` | OFFSET n |
-| `include(relations)` | Eager load relations |
-| `select(fields)` | SELECT specific fields |
-| `distinct()` | SELECT DISTINCT |
-| `groupBy(fields)` | GROUP BY |
-| `having(condition)` | HAVING |
-| `forUpdate()` | FOR UPDATE lock |
-| `lockInShareMode()` | LOCK IN SHARE MODE |
-| `get()` | Execute and get results |
-| `first()` | Get first result |
-| `firstOrFail(message)` | Get first or throw |
-| `count()` | Count records |
-| `exists()` | Check if records exist |
-| `aggregate(op, field)` | Aggregate calculation |
-| `sum(field)` | SUM aggregation |
-| `avg(field)` | AVG aggregation |
-| `min(field)` | MIN aggregation |
-| `max(field)` | MAX aggregation |
-| `paginate(page, perPage)` | Paginate results |
-| `values(...fields)` | Get plain objects |
-| `value(field)` | Get single value |
-| `update(data)` | Bulk update |
-| `delete()` | Bulk delete |
-| `increment(field, amount)` | Increment field |
-| `decrement(field, amount)` | Decrement field |
+```javascript
+// Filtering
+.where(conditions)
+.orWhere(conditions)
+.whereOp(field, operator, value)
+.whereIn(field, values)
+.whereNotIn(field, values)
+.whereNull(field)
+.whereNotNull(field)
+.whereBetween(field, range)
+.whereNotBetween(field, range)
+.whereLike(field, pattern)
+.search(field, value)
 
-### Model Methods
+// Ordering
+.order(field, direction)
+.orderBy(field, direction)
+.orderByMultiple(fields)
+
+// Pagination
+.take(n)           // LIMIT n
+.skip(n)           // OFFSET n
+.limit(n)          // Alias for take
+.offset(n)         // Alias for skip
+.paginate(page, perPage)
+
+// Selection
+.select(fields)
+.distinct(field)
+
+// Eager loading
+.include(relations)
+.with(relations)
+
+// Execution
+.get()            // Get all results
+.first()          // Get first result
+.firstOrFail(msg) // Get first or throw
+.value(field)     // Get single value
+.values(...fields)  // Get as objects
+.count()          // Count records
+.exists()         // Check existence
+.aggregate(op, field)  // SUM, AVG, MIN, MAX, COUNT
+.sum(field)
+.avg(field)
+.min(field)
+.max(field)
+
+// Bulk operations
+.update(data)     // Update matching
+.delete()         // Delete matching
+.increment(field, amount)
+.decrement(field, amount)
+```
+
+---
+
+## Error Handling
+
+### Error Types
 
 ```javascript
-// Static
-User.create(data)
-User.findById(id)
-User.findOne(where, options)
-User.findOrFail(id, message)
-User.firstOrCreate(where, data)
-User.updateOrCreate(where, data)
-User.find(where, options)
-User.bulkCreate(records)
-User.count(where)
-User.exists(where)
-User.query()
-User.sync()
-User.orm  // Reference to UltraORM instance
+const { UltraORMError, ValidationError, NotFoundError, DatabaseError } = require('ultraorm');
 
-// Instance
-user.save()
-user.delete()
-user.destroy()
-user.refresh()
-user.toJSON()
-user.toObject()
-user.fill(data)
-user.get(fieldName)
-user.set(fieldName, value)
-user.isDirty()
-user.getChanged()
+// Validation errors (field validation)
+try {
+  user.save();
+} catch (ValidationError e) {
+  console.log(e.field);  // The field that failed
+  console.log(e.message);
+}
 
-// Relationships
-User.hasMany(Target, options)
-User.hasOne(Target, options)
-User.belongsTo(Target, options)
-User.belongsToMany(Target, options)
-User.hasManyThrough(Target, options)
-User.morphMany(Target, options)
-User.morphOne(Target, options)
-User.morphTo(options)
-User.morphToMany(Target, options)
-User.morphedByMany(Target, options)
-User.belongsToSelf(options)
+// Not found errors
+try {
+  const user = await User.findOrFail(id);
+} catch (NotFoundError e) {
+  console.log(e.model);  // Model table name
+}
+
+// Database errors
+try {
+  await orm.connect();
+} catch (DatabaseError e) {
+  console.log(e.originalError);  // Original error
+}
+```
+
+### Best Practices
+
+```javascript
+// Always wrap in try-catch
+try {
+  const user = await User.create(data);
+} catch (ValidationError e) {
+  // Handle validation errors
+  console.log(e.field.name, e.message);
+} catch (DatabaseError e) {
+  // Handle database errors
+  console.error(e.message);
+}
 ```
 
 ---
 
 ## Best Practices
 
-### 1. Use Async/Await
+### Security
 
 ```javascript
-// ✅ Correct
-async function getUsers() {
-  const users = await User.find({ status: 'active' });
-  return users;
-}
+// Always validate user input
+User.validate();  // Validate before save
 
-// ❌ Avoid
-function getUsers() {
-  return User.find({ status: 'active' }); // Returns Promise
-}
+// Use parameterized queries (automatic in UltraORM)
+await User.query().where({ email: userInput });  // Safe
+
+// Escape identifiers (automatic in UltraORM)
+await User.query().where({ 'malicious_field'; DROP TABLE users; --': value });  // Safe
 ```
 
-### 2. Handle Errors
+### Performance
 
 ```javascript
-try {
-  const user = await User.findOrFail(id);
-} catch (error) {
-  if (error.name === 'NotFoundError') {
-    // Handle 404
+// Use eager loading to avoid N+1 queries
+const posts = await Post.query()
+  .include('author', 'category', 'tags')
+  .get();
+
+// Use pagination for large datasets
+const { items, pagination } = await Post.query().paginate(page, perPage);
+
+// Use select() to limit columns
+const names = await User.query().select('name').get();
+
+// Use indexes for frequently queried fields
+static fields = {
+  email: new StringField({ unique: true, index: true })
+};
+```
+
+### Code Organization
+
+```javascript
+// models/User.js
+const { Model, StringField, IntegerField, DateTimeField } = require('ultraorm');
+
+class User extends Model {
+  static tableName = 'users';
+  static fields = {
+    // Define fields
+  };
+  
+  // Static methods for model-specific queries
+  static async findByEmail(email) {
+    return this.findOne({ email });
   }
-  throw error;
-}
-```
-
-### 3. Use Transactions for Related Operations
-
-```javascript
-await orm.transaction(async () => {
-  const user = await User.create({ name: 'John' });
-  const profile = await Profile.create({ userId: user.id });
-  return { user, profile };
-});
-```
-
-### 4. Index Frequently Queried Fields
-
-```javascript
-// For frequently filtered fields
-new StringField({ index: true })
-
-// Or define in model
-static indexes = [
-  { fields: ['status', 'createdAt'] }
-];
-```
-
-### 5. Validate Before Saving
-
-```javascript
-try {
-  user.validate();
-  await user.save();
-} catch (error) {
-  if (error.name === 'ValidationError') {
-    console.error('Validation failed:', error.message);
+  
+  static async findAdmins() {
+    return this.query()
+      .where({ role: 'admin' })
+      .get();
   }
 }
+
+module.exports = User;
 ```
 
-### 6. Use Pagination for Large Datasets
+---
 
-```javascript
-// ✅ Efficient
-const { items, pagination } = await User.query().paginate(1, 50);
+## Roadmap
 
-// ❌ May cause memory issues
-const users = await User.query().get(); // All users
-```
+### Version 2.1.0 (Planned)
+- [ ] TypeScript definitions improvement
+- [ ] Query caching layer
+- [ ] Database replication support
+- [ ] Soft delete support (paranoid)
+- [ ] Observer pattern for model events
 
-### 7. Close Connections Gracefully
+### Version 2.2.0 (Planned)
+- [ ] Full-text search support
+- [ ] Database sharding helpers
+- [ ] Automatic query optimization hints
+- [ ] GraphQL integration
+- [ ] Redis caching adapter
 
-```javascript
-process.on('SIGINT', async () => {
-  await orm.disconnect();
-  process.exit(0);
-});
-```
+### Version 3.0.0 (Future)
+- [ ] MongoDB aggregation pipeline builder
+- [ ] Multi-tenancy support
+- [ ] GraphQL schema generation
+- [ ] Real-time subscriptions (WebSocket)
+- [ ] Database migration versioning UI
+
+### Planned Field Types
+- [ ] IPAddressField
+- [ ] ColorField (hex color picker)
+- [ ] FileField / ImageField (with upload handling)
+- [ ] PhoneNumberField
+- [ ] CreditCardField (with Luhn validation)
 
 ---
 
@@ -1374,20 +1151,51 @@ process.on('SIGINT', async () => {
 
 Contributions are welcome! Please read our contributing guidelines before submitting PRs.
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/ultraorm.git
+
+# Install dependencies
+npm install
+
+# Run tests
+npm test
+
+# Build
+npm run build
+```
 
 ---
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License - Copyright (c) 2024 UltraORM Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+
+---
+
+## Support
+
+- 📖 Documentation: [docs.ultraorm.dev](https://docs.ultraorm.dev)
+- 💬 Discord: [Join our community](https://discord.gg/ultraorm)
+- 🐛 Issues: [GitHub Issues](https://github.com/yourusername/ultraorm/issues)
+- 📧 Email: support@ultraorm.dev
 
 ---
 
 <p align="center">
-  <strong>Built with ❤️ for Node.js developers</strong>
+  <strong>Built with ❤️ for the Node.js community</strong>
 </p>
