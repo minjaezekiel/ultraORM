@@ -220,6 +220,24 @@ const ForeignKey = Core.ForeignKey;
  */
 const OneToOneField = Core.OneToOneField;
 
+/**
+ * MoneyField - For monetary values with precise decimal handling
+ *
+ * @example
+ * new MoneyField({ currency: 'USD' })
+ * new MoneyField({ currency: 'EUR', minValue: 0, maxValue: 1000000 })
+ */
+const MoneyField = Core.MoneyField;
+
+/**
+ * MoneyValue - Immutable value object for monetary amounts
+ *
+ * @example
+ * const price = new MoneyValue(19.99, 'USD');
+ * price.format(); // '$19.99'
+ */
+const MoneyValue = Core.MoneyValue;
+
 // ==================== ERROR CLASSES ====================
 
 /**
@@ -347,6 +365,8 @@ module.exports = {
   BinaryField,
   ForeignKey,
   OneToOneField,
+  MoneyField,
+  MoneyValue,
 
   // Error classes
   UltraORMError,

@@ -153,14 +153,14 @@ class DatabaseError extends UltraORMError {
 }
 
 // ==================== UTILITY FUNCTIONS ====================
-/**
- * Converts camelCase to snake_case
- * @param {string} str - String to convert
- * @returns {string} - Converted string
- */
-function toSnakeCase(str) {
-  return str.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
-}
+  /**
+   * Converts camelCase to snake_case
+   * @param {string} str - String to convert
+   * @returns {string} - Converted string
+   */
+  function toSnakeCase(str) {
+    return str.replace(/[A-Z]/g, (letter, index) => index === 0 ? letter.toLowerCase() : `_${letter.toLowerCase()}`);
+  }
 
 /**
  * Converts snake_case to camelCase
@@ -369,6 +369,7 @@ class IntegerField extends Field {
         throw new ValidationError(`Must be at most ${this.max}`, this);
       }
     }
+    return true;
   }
 }
 
@@ -495,6 +496,488 @@ class StringField extends Field {
       }
     }
     return true;
+  }
+}
+
+/**
+ * MoneyField - For monetary values with precise decimal handling
+ * 
+ * @extends DecimalField
+ * 
+ * OPTIONS (in addition to DecimalField options):
+ * - currency {string} - Currency code (e.g., 'USD', 'EUR', 'GBP')
+ * - defaultCurrency {string} - Default currency for new records
+ * - minValue {number} - Minimum allowed value (in smallest currency unit)
+ * - maxValue {number} - Maximum allowed value (in smallest currency unit)
+ * - storeAsCents {boolean} - Store as integer cents (default: true)
+ * 
+ * FEATURES:
+ * - Automatic decimal precision handling
+ * - Currency formatting
+ * - Value validation with currency-specific rules
+ * - Automatic conversion between formats
+ * 
+ * @example
+ * // Basic usage - stores as cents internally
+ * new MoneyField({ currency: 'USD' })
+ * 
+ * // With options
+ * new MoneyField({ 
+ *   currency: 'EUR',
+ *   minValue: 0,
+ *   maxValue: 1000000,
+ *   default: 0
+ * })
+ * 
+ * // Decimal precision (for crypto or special cases)
+ * new MoneyField({ 
+ *   precision: 8,
+ *   scale: 8,
+ *   currency: 'BTC',
+ *   storeAsCents: false
+ * })
+ */
+class MoneyField extends DecimalField {
+  constructor(options = {}) {
+    // Default precision for money is typically 19,10 (enough for most currencies + crypto)
+    const precision = options.precision || options.maxDigits || 19;
+    const scale = options.scale || options.decimalPlaces || (options.storeAsCents === false ? 8 : 2);
+    
+    super({
+      ...options,
+      precision,
+      scale
+    });
+    
+    this.currency = options.currency || 'USD';
+    this.defaultCurrency = options.defaultCurrency || this.currency;
+    this.minValue = options.minValue;
+    this.maxValue = options.maxValue;
+    // storeAsCents: true means 19.99 is stored as 1999 (integer cents)
+    // storeAsCents: false means 19.99 is stored as 19.99 (decimal)
+    this.storeAsCents = options.storeAsCents !== false;
+    
+    // For cents storage, use BIGINT for better range
+    if (this.storeAsCents) {
+      this.dbType = 'BIGINT';
+    } else {
+      this.dbType = `DECIMAL(${this.precision},${this.scale})`;
+    }
+  }
+
+  /**
+   * Validate a money value
+   * @param {*} value - Value to validate
+   * @returns {boolean} - True if valid
+   * @throws {ValidationError} - If validation fails
+   */
+  validate(value) {
+    // Allow null/undefined if nullable
+    if (value === null || value === undefined) {
+      return super.validate(value);
+    }
+
+    // Handle MoneyValue objects
+    let numericValue = value;
+    let currency = this.currency;
+    
+    if (value instanceof MoneyValue) {
+      numericValue = value.amount;
+      currency = value.currency;
+    } else if (typeof value === 'object' && value !== null && 'amount' in value) {
+      // Plain object with amount property
+      numericValue = value.amount;
+      currency = value.currency || this.currency;
+    }
+
+    // Validate numeric value
+    if (typeof numericValue !== 'number') {
+      // Try to convert string to number
+      if (typeof numericValue === 'string') {
+        numericValue = parseFloat(numericValue.replace(/[^0-9.-]/g, ''));
+        if (isNaN(numericValue)) {
+          throw new ValidationError('Money value must be a valid number', this);
+        }
+      } else {
+        throw new ValidationError('Money value must be a number or MoneyValue object', this);
+      }
+    }
+
+    // Validate min/max
+    if (this.minValue !== undefined && numericValue < this.minValue) {
+      throw new ValidationError(`Money value must be at least ${this.minValue} ${currency}`, this);
+    }
+    
+    if (this.maxValue !== undefined && numericValue > this.maxValue) {
+      throw new ValidationError(`Money value must be at most ${this.maxValue} ${currency}`, this);
+    }
+
+    // Validate currency if provided
+    if (value instanceof MoneyValue || (typeof value === 'object' && 'currency' in value)) {
+      const validCurrencies = ['USD', 'EUR', 'GBP', 'JPY', 'CNY', 'AUD', 'CAD', 'CHF', 'BTC', 'ETH', 'USDT', 'USDC'];
+      if (validCurrencies.length > 0 && !validCurrencies.includes(currency)) {
+        console.warn(`[UltraORM] Unknown currency code: ${currency}. Consider adding it to the validation list.`);
+      }
+    }
+
+    return true;
+  }
+
+  /**
+   * Prepare value for database storage
+   * @param {*} value - Value to prepare
+   * @returns {number} - Prepared value for database
+   */
+  prepareValue(value) {
+    // Return null for null/undefined
+    if (value === null || value === undefined) {
+      return null;
+    }
+
+    let amount = value;
+    let currency = this.currency;
+
+    // Handle MoneyValue objects
+    if (value instanceof MoneyValue) {
+      amount = value.amount;
+      currency = value.currency;
+    } else if (typeof value === 'object' && value !== null && 'amount' in value) {
+      amount = value.amount;
+      currency = value.currency || this.currency;
+    }
+
+    // Convert to number
+    if (typeof amount === 'string') {
+      amount = parseFloat(amount.replace(/[^0-9.-]/g, ''));
+    }
+
+    if (isNaN(amount)) {
+      throw new ValidationError('Invalid money amount', this);
+    }
+
+    // Store as cents or decimal based on configuration
+    if (this.storeAsCents) {
+      // Round to nearest cent (2 decimal places) before converting to cents
+      const roundedAmount = Math.round(amount * 100) / 100;
+      return Math.round(roundedAmount * 100);
+    } else {
+      // Round to the specified scale
+      const multiplier = Math.pow(10, this.scale);
+      return Math.round(amount * multiplier) / multiplier;
+    }
+  }
+
+  /**
+   * Convert value from database
+   * @param {*} value - Value from database
+   * @returns {MoneyValue} - MoneyValue object
+   */
+  fromDatabase(value) {
+    if (value === null || value === undefined) {
+      return new MoneyValue(0, this.currency);
+    }
+
+    let amount = value;
+
+    // Convert from cents if stored as cents
+    if (this.storeAsCents) {
+      amount = Number(value) / 100;
+    } else {
+      amount = parseFloat(value);
+    }
+
+    if (isNaN(amount)) {
+      return new MoneyValue(0, this.currency);
+    }
+
+    return new MoneyValue(amount, this.currency);
+  }
+
+  /**
+   * Get SQL definition for this field
+   * @param {string} fieldName - Name of the field
+   * @param {string} adapterType - Database adapter type
+   * @returns {string} - SQL definition
+   */
+  getSQLDefinition(fieldName, adapterType = 'mysql') {
+    const escapedName = escapeIdentifier(fieldName, adapterType);
+    
+    if (this.storeAsCents) {
+      // BIGINT for cents storage
+      return `${escapedName} BIGINT ${this.nullable ? 'NULL' : 'NOT NULL'}`;
+    } else {
+      return `${escapedName} DECIMAL(${this.precision},${this.scale}) ${this.nullable ? 'NULL' : 'NOT NULL'}`;
+    }
+  }
+}
+
+/**
+ * MoneyValue - Immutable value object representing a monetary amount
+ * 
+ * Provides safe manipulation of monetary values with proper rounding
+ * and currency handling.
+ * 
+ * @example
+ * const price = new MoneyValue(19.99, 'USD');
+ * const total = price.add(new MoneyValue(5.00, 'USD'));
+ * console.log(total.format()); // '$19.99'
+ */
+class MoneyValue {
+  /**
+   * Create a new MoneyValue
+   * @param {number} amount - Monetary amount
+   * @param {string} currency - Currency code (ISO 4217)
+   */
+  constructor(amount, currency = 'USD') {
+    if (typeof amount !== 'number' || isNaN(amount)) {
+      throw new ValidationError('Money amount must be a valid number');
+    }
+    
+    this._amount = Math.round(amount * 100) / 100; // Always store with 2 decimal precision
+    this._currency = currency.toUpperCase();
+    
+    // Make immutable
+    Object.freeze(this);
+  }
+
+  /**
+   * Get the monetary amount
+   * @returns {number}
+   */
+  get amount() {
+    return this._amount;
+  }
+
+  /**
+   * Get the currency code
+   * @returns {string}
+   */
+  get currency() {
+    return this._currency;
+  }
+
+  /**
+   * Add another MoneyValue
+   * @param {MoneyValue} other - Value to add
+   * @returns {MoneyValue} - New MoneyValue with result
+   * @throws {ValidationError} - If currencies don't match
+   */
+  add(other) {
+    if (!(other instanceof MoneyValue)) {
+      throw new ValidationError('Can only add MoneyValue objects');
+    }
+    if (other.currency !== this._currency) {
+      throw new ValidationError(`Currency mismatch: ${this._currency} + ${other.currency}`);
+    }
+    return new MoneyValue(this._amount + other._amount, this._currency);
+  }
+
+  /**
+   * Subtract another MoneyValue
+   * @param {MoneyValue} other - Value to subtract
+   * @returns {MoneyValue} - New MoneyValue with result
+   * @throws {ValidationError} - If currencies don't match
+   */
+  subtract(other) {
+    if (!(other instanceof MoneyValue)) {
+      throw new ValidationError('Can only subtract MoneyValue objects');
+    }
+    if (other.currency !== this._currency) {
+      throw new ValidationError(`Currency mismatch: ${this._currency} - ${other.currency}`);
+    }
+    return new MoneyValue(this._amount - other._amount, this._currency);
+  }
+
+  /**
+   * Multiply by a number
+   * @param {number} factor - Multiplication factor
+   * @returns {MoneyValue} - New MoneyValue with result
+   */
+  multiply(factor) {
+    if (typeof factor !== 'number') {
+      throw new ValidationError('Multiplier must be a number');
+    }
+    return new MoneyValue(this._amount * factor, this._currency);
+  }
+
+  /**
+   * Divide by a number
+   * @param {number} divisor - Division divisor
+   * @returns {MoneyValue} - New MoneyValue with result
+   * @throws {ValidationError} - If divisor is zero
+   */
+  divide(divisor) {
+    if (typeof divisor !== 'number' || divisor === 0) {
+      throw new ValidationError('Divisor must be a non-zero number');
+    }
+    return new MoneyValue(this._amount / divisor, this._currency);
+  }
+
+  /**
+   * Check if equal to another MoneyValue
+   * @param {MoneyValue} other - Value to compare
+   * @returns {boolean}
+   */
+  equals(other) {
+    if (!(other instanceof MoneyValue)) {
+      return false;
+    }
+    return this._amount === other._amount && this._currency === other._currency;
+  }
+
+  /**
+   * Check if greater than another MoneyValue
+   * @param {MoneyValue} other - Value to compare
+   * @returns {boolean}
+   */
+  greaterThan(other) {
+    if (!(other instanceof MoneyValue)) {
+      throw new ValidationError('Can only compare MoneyValue objects');
+    }
+    if (other.currency !== this._currency) {
+      throw new ValidationError(`Currency mismatch: ${this._currency} > ${other.currency}`);
+    }
+    return this._amount > other._amount;
+  }
+
+  /**
+   * Check if less than another MoneyValue
+   * @param {MoneyValue} other - Value to compare
+   * @returns {boolean}
+   */
+  lessThan(other) {
+    if (!(other instanceof MoneyValue)) {
+      throw new ValidationError('Can only compare MoneyValue objects');
+    }
+    if (other.currency !== this._currency) {
+      throw new ValidationError(`Currency mismatch: ${this._currency} < ${other.currency}`);
+    }
+    return this._amount < other._amount;
+  }
+
+  /**
+   * Check if greater than or equal to another MoneyValue
+   * @param {MoneyValue} other - Value to compare
+   * @returns {boolean}
+   */
+  greaterThanOrEqual(other) {
+    return this.equals(other) || this.greaterThan(other);
+  }
+
+  /**
+   * Check if less than or equal to another MoneyValue
+   * @param {MoneyValue} other - Value to compare
+   * @returns {boolean}
+   */
+  lessThanOrEqual(other) {
+    return this.equals(other) || this.lessThan(other);
+  }
+
+  /**
+   * Format as currency string
+   * @param {Object} options - Formatting options
+   * @param {string} options.locale - Locale for formatting (default: 'en-US')
+   * @param {boolean} options.showSymbol - Show currency symbol (default: true)
+   * @param {boolean} options.showCode - Show currency code (default: false)
+   * @returns {string} - Formatted string
+   * 
+   * @example
+   * const price = new MoneyValue(19.99, 'USD');
+   * price.format(); // '$19.99'
+   * price.format({ locale: 'de-DE' }); // '19,99 $'
+   * price.format({ showCode: true }); // 'USD 19.99'
+   */
+  format(options = {}) {
+    const {
+      locale = 'en-US',
+      showSymbol = true,
+      showCode = false
+    } = options;
+
+    try {
+      const formatter = new Intl.NumberFormat(locale, {
+        style: showCode ? 'decimal' : 'currency',
+        currency: this._currency,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+
+      let formatted = formatter.format(this._amount);
+      
+      if (showCode && showSymbol) {
+        formatted = `${this._currency} ${formatted}`;
+      } else if (showCode && !showSymbol) {
+        formatted = `${this._currency} ${this._amount.toFixed(2)}`;
+      }
+      
+      return formatted;
+    } catch {
+      // Fallback formatting
+      return `${this._currency} ${this._amount.toFixed(2)}`;
+    }
+  }
+
+  /**
+   * Convert to cents (if using 2 decimal places)
+   * @returns {number} - Amount in cents
+   */
+  toCents() {
+    return Math.round(this._amount * 100);
+  }
+
+  /**
+   * Create from cents
+   * @param {number} cents - Amount in cents
+   * @param {string} currency - Currency code
+   * @returns {MoneyValue}
+   */
+  static fromCents(cents, currency = 'USD') {
+    return new MoneyValue(cents / 100, currency);
+  }
+
+  /**
+   * Create zero value
+   * @param {string} currency - Currency code
+   * @returns {MoneyValue}
+   */
+  static zero(currency = 'USD') {
+    return new MoneyValue(0, currency);
+  }
+
+  /**
+   * Convert to plain object
+   * @returns {Object} - { amount, currency }
+   */
+  toJSON() {
+    return {
+      amount: this._amount,
+      currency: this._currency
+    };
+  }
+
+  /**
+   * Convert to string
+   * @returns {string}
+   */
+  toString() {
+    return `${this._currency} ${this._amount.toFixed(2)}`;
+  }
+
+  /**
+   * ValueOf for numeric comparisons
+   * @returns {number}
+   */
+  valueOf() {
+    return this._amount;
+  }
+
+  /**
+   * Create a copy with a different currency
+   * @param {string} currency - New currency
+   * @returns {MoneyValue}
+   */
+  withCurrency(currency) {
+    return new MoneyValue(this._amount, currency);
   }
 }
 
@@ -875,7 +1358,7 @@ class JSONField extends Field {
     if (value !== null && value !== undefined) {
       try {
         JSON.stringify(value);
-      } catch {
+      } catch (e) {
         throw new ValidationError('Must be valid JSON', this);
       }
     }
@@ -1047,12 +1530,12 @@ const QUERY_OPERATORS = {
   // IN operations
   '$in': (field, value) => {
     if (!Array.isArray(value)) value = [value];
-    const placeholders = value.map(() => '?').join(', ');
+    const placeholders = value.map(() => '?').join(',');
     return { clause: `${field} IN (${placeholders})`, value };
   },
   '$notIn': (field, value) => {
     if (!Array.isArray(value)) value = [value];
-    const placeholders = value.map(() => '?').join(', ');
+    const placeholders = value.map(() => '?').join(',');
     return { clause: `${field} NOT IN (${placeholders})`, value };
   },
   
@@ -1911,16 +2394,20 @@ class QuerySet {
 
     const clauses = [];
     const values = [];
+    const adapterType = this.model?.orm?.config?.type || 'mysql';
 
     for (const [key, value] of Object.entries(condition)) {
       if (key.startsWith('$')) continue; // Skip $or handled elsewhere
-      
+
+      // Escape the field name to prevent SQL injection
+      const escapedKey = escapeIdentifier(key, adapterType);
+
       if (value && typeof value === 'object' && !Array.isArray(value)) {
         // Handle operators
         for (const [op, opValue] of Object.entries(value)) {
           const handler = QUERY_OPERATORS[op];
           if (handler) {
-            const result = handler(key, opValue);
+            const result = handler(escapedKey, opValue);
             clauses.push(result.clause);
             if (result.value !== undefined && result.value !== null) {
               if (Array.isArray(result.value)) {
@@ -1934,11 +2421,11 @@ class QuerySet {
       } else {
         // Simple equality or IN
         if (Array.isArray(value)) {
-          const placeholders = value.map(() => '?').join(', ');
-          clauses.push(`${key} IN (${placeholders})`);
+          const placeholders = value.map(() => '?').join(',');
+          clauses.push(`${escapedKey} IN (${placeholders})`);
           values.push(...value);
         } else {
-          clauses.push(`${key} = ?`);
+          clauses.push(`${escapedKey} = ?`);
           values.push(value);
         }
       }
@@ -1956,13 +2443,17 @@ class QuerySet {
   _buildSimpleWhere(where) {
     const conditions = [];
     const values = [];
+    const adapterType = this.model?.orm?.config?.type || 'mysql';
 
     for (const [key, value] of Object.entries(where)) {
+      // Escape the field name to prevent SQL injection
+      const escapedKey = escapeIdentifier(key, adapterType);
+
       if (value && typeof value === 'object' && !Array.isArray(value)) {
         for (const [op, opValue] of Object.entries(value)) {
           const handler = QUERY_OPERATORS[op];
           if (handler) {
-            const result = handler(key, opValue);
+            const result = handler(escapedKey, opValue);
             conditions.push(result.clause);
             if (result.value !== null) {
               if (Array.isArray(result.value)) {
@@ -1974,11 +2465,11 @@ class QuerySet {
           }
         }
       } else if (Array.isArray(value)) {
-        const placeholders = value.map(() => '?').join(', ');
-        conditions.push(`${key} IN (${placeholders})`);
+        const placeholders = value.map(() => '?').join(',');
+        conditions.push(`${escapedKey} IN (${placeholders})`);
         values.push(...value);
       } else {
-        conditions.push(`${key} = ?`);
+        conditions.push(`${escapedKey} = ?`);
         values.push(value);
       }
     }
@@ -3100,6 +3591,7 @@ class Model {
     }
 
     this._originalData = { ...this.data };
+    this._changes.clear(); // Clear changes after initial construction
   }
 
   // ==================== GETTER/SETTER METHODS ====================
@@ -3525,23 +4017,27 @@ class Model {
   static _buildWhereClause(where = {}) {
     const conditions = [];
     const values = [];
+    const adapterType = this.orm?.config?.type || 'mysql';
 
     for (const [key, value] of Object.entries(where)) {
+      // Escape the field name to prevent SQL injection
+      const escapedKey = escapeIdentifier(key, adapterType);
+
       if (value === null) {
-        conditions.push(`${key} IS NULL`);
+        conditions.push(`${escapedKey} IS NULL`);
       } else if (Array.isArray(value)) {
         if (value.length === 0) {
           conditions.push('1 = 0');
         } else {
-          const placeholders = value.map(() => '?').join(', ');
-          conditions.push(`${key} IN (${placeholders})`);
+          const placeholders = value.map(() => '?').join(',');
+          conditions.push(`${escapedKey} IN (${placeholders})`);
           values.push(...value);
         }
       } else if (value && typeof value === 'object') {
         for (const [op, opValue] of Object.entries(value)) {
           const handler = QUERY_OPERATORS[op];
           if (handler) {
-            const result = handler(key, opValue);
+            const result = handler(escapedKey, opValue);
             conditions.push(result.clause);
             if (result.value !== undefined && result.value !== null) {
               if (Array.isArray(result.value)) {
@@ -3553,7 +4049,7 @@ class Model {
           }
         }
       } else {
-        conditions.push(`${key} = ?`);
+        conditions.push(`${escapedKey} = ?`);
         values.push(value);
       }
     }
@@ -4159,6 +4655,706 @@ class Model {
       target: targetModel,
       as
     };
+  }
+
+  // ==================== MANY-TO-MANY RELATIONSHIP METHODS ====================
+
+  /**
+   * Attach related records to this instance via belongsToMany relationship
+   * 
+   * @param {string|Array} relationName - Name of the belongsToMany relationship
+   * @param {Array} ids - IDs of records to attach (can also be model instances)
+   * @param {Object} pivotData - Optional pivot table data
+   * @returns {Promise<number>} - Number of attachments created
+   * 
+   * @example
+   * // Attach single role
+   * await user.attach('roles', 1);
+   * 
+   * // Attach multiple roles
+   * await user.attach('roles', [1, 2, 3]);
+   * 
+   * // Attach with pivot data
+   * await user.attach('roles', [1, 2], { assignedAt: new Date() });
+   * 
+   * // Attach from model instances
+   * await user.attach('roles', [role1, role2]);
+   */
+  async attach(relationName, ids, pivotData = null) {
+    if (!this.orm) {
+      throw new UltraORMError('Model must be registered with an ORM instance');
+    }
+
+    const association = this.constructor.associations[relationName];
+    if (!association) {
+      throw new UltraORMError(`Relationship "${relationName}" not found on model ${this.constructor.tableName}`);
+    }
+
+    if (association.type !== 'belongsToMany') {
+      throw new UltraORMError(`attach() can only be used with belongsToMany relationships, found: ${association.type}`);
+    }
+
+    // Get the junction table
+    const through = typeof association.through === 'string' 
+      ? association.through 
+      : (association.through.tableName || association.through);
+    
+    const foreignKey = association.foreignKey;
+    const otherKey = association.otherKey;
+    const sourceKey = association.sourceKey || 'id';
+    
+    // Get the ID of this instance
+    const instanceId = this.get(sourceKey);
+    if (!instanceId) {
+      throw new UltraORMError('Cannot attach relations to an unsaved record');
+    }
+
+    // Normalize IDs to array of numbers/strings
+    const normalizedIds = this._normalizeIds(ids);
+    if (normalizedIds.length === 0) {
+      return 0;
+    }
+
+    // Filter out already attached records
+    const existingRecords = await this._getAttachedIds(through, foreignKey, otherKey, instanceId);
+    const newIds = normalizedIds.filter(id => !existingRecords.includes(String(id)));
+    
+    if (newIds.length === 0) {
+      console.log(`[UltraORM] All ${relationName} already attached`);
+      return 0;
+    }
+
+    // Build insert values
+    const now = new Date();
+    const recordsToInsert = [];
+    
+    for (const targetId of newIds) {
+      const record = {
+        [foreignKey]: instanceId,
+        [otherKey]: targetId
+      };
+      
+      // Add pivot data if provided
+      if (pivotData) {
+        if (typeof pivotData === 'function') {
+          Object.assign(record, pivotData(targetId));
+        } else if (typeof pivotData === 'object') {
+          Object.assign(record, pivotData);
+        }
+      }
+      
+      recordsToInsert.push(record);
+    }
+
+    // Insert records
+    return await this._insertJunctionRecords(through, recordsToInsert);
+  }
+
+  /**
+   * Detach (remove) related records from this instance
+   * 
+   * @param {string|Array} relationName - Name of the belongsToMany relationship
+   * @param {Array} ids - IDs of records to detach (optional - if not provided, detaches all)
+   * @returns {Promise<number>} - Number of records detached
+   * 
+   * @example
+   * // Detach single role
+   * await user.detach('roles', 1);
+   * 
+   * // Detach multiple roles
+   * await user.detach('roles', [1, 2]);
+   * 
+   * // Detach all roles
+   * await user.detach('roles');
+   */
+  async detach(relationName, ids = null) {
+    if (!this.orm) {
+      throw new UltraORMError('Model must be registered with an ORM instance');
+    }
+
+    const association = this.constructor.associations[relationName];
+    if (!association) {
+      throw new UltraORMError(`Relationship "${relationName}" not found on model ${this.constructor.tableName}`);
+    }
+
+    if (association.type !== 'belongsToMany') {
+      throw new UltraORMError(`detach() can only be used with belongsToMany relationships, found: ${association.type}`);
+    }
+
+    const through = typeof association.through === 'string' 
+      ? association.through 
+      : (association.through.tableName || association.through);
+    
+    const foreignKey = association.foreignKey;
+    const sourceKey = association.sourceKey || 'id';
+    
+    const instanceId = this.get(sourceKey);
+    if (!instanceId) {
+      throw new UltraORMError('Cannot detach relations from an unsaved record');
+    }
+
+    let whereClause = `${foreignKey} = ?`;
+    let params = [instanceId];
+
+    // If specific IDs provided, filter
+    if (ids !== null) {
+      const normalizedIds = this._normalizeIds(ids);
+      if (normalizedIds.length === 0) {
+        return 0;
+      }
+      const placeholders = normalizedIds.map(() => '?').join(', ');
+      whereClause = `${foreignKey} = ? AND ${association.otherKey} IN (${placeholders})`;
+      params = [instanceId, ...normalizedIds];
+    }
+
+    const dbType = this.orm.config.type;
+    let deletedCount = 0;
+
+    if (dbType === 'mongodb') {
+      const db = this.orm.adapter.client.db(this.orm.config.database);
+      const collection = db.collection(through);
+      const result = await collection.deleteMany({ [foreignKey]: instanceId, ...(ids ? { [association.otherKey]: { $in: this._normalizeIds(ids) } } : {}) });
+      deletedCount = result.deletedCount || 0;
+    } else {
+      const sql = `DELETE FROM ${through} WHERE ${whereClause}`;
+      const { result } = await this.orm.adapter.execute(sql, params);
+      deletedCount = result?.affectedRows || 0;
+    }
+
+    console.log(`[UltraORM] Detached ${deletedCount} ${relationName} from ${this.constructor.tableName}`);
+    return deletedCount;
+  }
+
+  /**
+   * Sync related records - replaces all with the provided IDs
+   * 
+   * @param {string|Array} relationName - Name of the belongsToMany relationship
+   * @param {Array} ids - IDs of records to sync
+   * @param {Object} pivotData - Optional pivot table data for new attachments
+   * @returns {Promise<void>}
+   * 
+   * @example
+   * // Sync roles (removes all existing and adds new ones)
+   * await user.sync('roles', [1, 2, 3]);
+   * 
+   * // Sync with pivot data
+   * await user.sync('roles', [1, 2], { assignedAt: new Date() });
+   */
+  async sync(relationName, ids, pivotData = null) {
+    if (!this.orm) {
+      throw new UltraORMError('Model must be registered with an ORM instance');
+    }
+
+    const association = this.constructor.associations[relationName];
+    if (!association) {
+      throw new UltraORMError(`Relationship "${relationName}" not found on model ${this.constructor.tableName}`);
+    }
+
+    if (association.type !== 'belongsToMany') {
+      throw new UltraORMError(`sync() can only be used with belongsToMany relationships, found: ${association.type}`);
+    }
+
+    const sourceKey = association.sourceKey || 'id';
+    const instanceId = this.get(sourceKey);
+    if (!instanceId) {
+      throw new UltraORMError('Cannot sync relations on an unsaved record');
+    }
+
+    // Detach all first
+    await this.detach(relationName);
+
+    // Attach new ones
+    if (ids && ids.length > 0) {
+      await this.attach(relationName, ids, pivotData);
+    }
+
+    console.log(`[UltraORM] Synced ${ids?.length || 0} ${relationName} to ${this.constructor.tableName}`);
+  }
+
+  /**
+   * Toggle attachment of related records
+   * 
+   * @param {string|Array} relationName - Name of the belongsToMany relationship
+   * @param {Array} ids - IDs to toggle
+   * @returns {Promise<Object>} - { attached: number, detached: number }
+   * 
+   * @example
+   * // Toggle roles (attach if not attached, detach if attached)
+   * const { attached, detached } = await user.toggle('roles', [1, 2]);
+   */
+  async toggle(relationName, ids) {
+    if (!this.orm) {
+      throw new UltraORMError('Model must be registered with an ORM instance');
+    }
+
+    const association = this.constructor.associations[relationName];
+    if (!association) {
+      throw new UltraORMError(`Relationship "${relationName}" not found on model ${this.constructor.tableName}`);
+    }
+
+    if (association.type !== 'belongsToMany') {
+      throw new UltraORMError(`toggle() can only be used with belongsToMany relationships, found: ${association.type}`);
+    }
+
+    const through = typeof association.through === 'string' 
+      ? association.through 
+      : (association.through.tableName || association.through);
+    
+    const foreignKey = association.foreignKey;
+    const otherKey = association.otherKey;
+    const sourceKey = association.sourceKey || 'id';
+    
+    const instanceId = this.get(sourceKey);
+    if (!instanceId) {
+      throw new UltraORMError('Cannot toggle relations on an unsaved record');
+    }
+
+    const normalizedIds = this._normalizeIds(ids);
+    if (normalizedIds.length === 0) {
+      return { attached: 0, detached: 0 };
+    }
+
+    // Get current attachments
+    const existingRecords = await this._getAttachedIds(through, foreignKey, otherKey, instanceId);
+    
+    const toAttach = normalizedIds.filter(id => !existingRecords.includes(String(id)));
+    const toDetach = normalizedIds.filter(id => existingRecords.includes(String(id)));
+
+    let attached = 0;
+    let detached = 0;
+
+    if (toDetach.length > 0) {
+      detached = await this.detach(relationName, toDetach);
+    }
+
+    if (toAttach.length > 0) {
+      attached = await this.attach(relationName, toAttach);
+    }
+
+    console.log(`[UltraORM] Toggled ${relationName}: ${attached} attached, ${detached} detached`);
+    return { attached, detached };
+  }
+
+  /**
+   * Update pivot data for an attached record
+   * 
+   * @param {string} relationName - Name of the belongsToMany relationship
+   * @param {number|string} relatedId - ID of the related record
+   * @param {Object} pivotData - Pivot data to update
+   * @returns {Promise<boolean>} - True if updated
+   * 
+   * @example
+   * // Update pivot data
+   * await user.updatePivot('roles', 1, { role: 'admin', assignedAt: new Date() });
+   */
+  async updatePivot(relationName, relatedId, pivotData) {
+    if (!this.orm) {
+      throw new UltraORMError('Model must be registered with an ORM instance');
+    }
+
+    const association = this.constructor.associations[relationName];
+    if (!association) {
+      throw new UltraORMError(`Relationship "${relationName}" not found on model ${this.constructor.tableName}`);
+    }
+
+    if (association.type !== 'belongsToMany') {
+      throw new UltraORMError(`updatePivot() can only be used with belongsToMany relationships`);
+    }
+
+    const through = typeof association.through === 'string' 
+      ? association.through 
+      : (association.through.tableName || association.through);
+    
+    const foreignKey = association.foreignKey;
+    const otherKey = association.otherKey;
+    const sourceKey = association.sourceKey || 'id';
+    
+    const instanceId = this.get(sourceKey);
+    if (!instanceId) {
+      throw new UltraORMError('Cannot update pivot on an unsaved record');
+    }
+
+    const updates = [];
+    const values = [];
+    
+    for (const [key, value] of Object.entries(pivotData)) {
+      // Don't update the foreign keys themselves
+      if (key !== foreignKey && key !== otherKey) {
+        updates.push(`${key} = ?`);
+        values.push(value);
+      }
+    }
+
+    if (updates.length === 0) {
+      return false;
+    }
+
+    values.push(instanceId, relatedId);
+
+    const sql = `UPDATE ${through} SET ${updates.join(', ')} WHERE ${foreignKey} = ? AND ${otherKey} = ?`;
+    const { result } = await this.orm.adapter.execute(sql, values);
+    
+    const updated = result?.affectedRows > 0;
+    if (updated) {
+      console.log(`[UltraORM] Updated pivot for ${relationName}:${relatedId}`);
+    }
+    return updated;
+  }
+
+  /**
+   * Check if a related record is attached
+   * 
+   * @param {string} relationName - Name of the belongsToMany relationship
+   * @param {number|string} relatedId - ID of the related record
+   * @returns {Promise<boolean>} - True if attached
+   * 
+   * @example
+   * const isAttached = await user.hasRole('roles', 1);
+   */
+  async hasAttached(relationName, relatedId) {
+    if (!this.orm) {
+      throw new UltraORMError('Model must be registered with an ORM instance');
+    }
+
+    const association = this.constructor.associations[relationName];
+    if (!association) {
+      throw new UltraORMError(`Relationship "${relationName}" not found on model ${this.constructor.tableName}`);
+    }
+
+    if (association.type !== 'belongsToMany') {
+      throw new UltraORMError(`hasAttached() can only be used with belongsToMany relationships`);
+    }
+
+    const through = typeof association.through === 'string' 
+      ? association.through 
+      : (association.through.tableName || association.through);
+    
+    const foreignKey = association.foreignKey;
+    const otherKey = association.otherKey;
+    const sourceKey = association.sourceKey || 'id';
+    
+    const instanceId = this.get(sourceKey);
+    if (!instanceId) {
+      throw new UltraORMError('Cannot check attachment on an unsaved record');
+    }
+
+    const dbType = this.orm.config.type;
+    
+    if (dbType === 'mongodb') {
+      const db = this.orm.adapter.client.db(this.orm.config.database);
+      const collection = db.collection(through);
+      const count = await collection.countDocuments({
+        [foreignKey]: instanceId,
+        [otherKey]: relatedId
+      });
+      return count > 0;
+    } else {
+      const sql = `SELECT 1 FROM ${through} WHERE ${foreignKey} = ? AND ${otherKey} = ? LIMIT 1`;
+      const { rows } = await this.orm.adapter.execute(sql, [instanceId, relatedId]);
+      return rows.length > 0;
+    }
+  }
+
+  /**
+   * Alias for hasAttached
+   */
+  async hasRelation(relationName, relatedId) {
+    return this.hasAttached(relationName, relatedId);
+  }
+
+  /**
+   * Get all pivot data for an attached record
+   * 
+   * @param {string} relationName - Name of the belongsToMany relationship
+   * @param {number|string} relatedId - ID of the related record
+   * @returns {Promise<Object|null>} - Pivot data or null if not attached
+   * 
+   * @example
+   * const pivotData = await user.getPivot('roles', 1);
+   * console.log(pivotData.role); // 'admin'
+   */
+  async getPivot(relationName, relatedId) {
+    if (!this.orm) {
+      throw new UltraORMError('Model must be registered with an ORM instance');
+    }
+
+    const association = this.constructor.associations[relationName];
+    if (!association) {
+      throw new UltraORMError(`Relationship "${relationName}" not found on model ${this.constructor.tableName}`);
+    }
+
+    if (association.type !== 'belongsToMany') {
+      throw new UltraORMError(`getPivot() can only be used with belongsToMany relationships`);
+    }
+
+    const through = typeof association.through === 'string' 
+      ? association.through 
+      : (association.through.tableName || association.through);
+    
+    const foreignKey = association.foreignKey;
+    const otherKey = association.otherKey;
+    const sourceKey = association.sourceKey || 'id';
+    
+    const instanceId = this.get(sourceKey);
+    if (!instanceId) {
+      throw new UltraORMError('Cannot get pivot on an unsaved record');
+    }
+
+    const dbType = this.orm.config.type;
+    
+    if (dbType === 'mongodb') {
+      const db = this.orm.adapter.client.db(this.orm.config.database);
+      const collection = db.collection(through);
+      return await collection.findOne({
+        [foreignKey]: instanceId,
+        [otherKey]: relatedId
+      });
+    } else {
+      const sql = `SELECT * FROM ${through} WHERE ${foreignKey} = ? AND ${otherKey} = ? LIMIT 1`;
+      const { rows } = await this.orm.adapter.execute(sql, [instanceId, relatedId]);
+      return rows[0] || null;
+    }
+  }
+
+  /**
+   * Attach with unique pivot data per record
+   * 
+   * @param {string} relationName - Name of the belongsToMany relationship
+   * @param {Array<Object>} records - Array of { id, pivotData }
+   * @returns {Promise<number>} - Number of attachments created
+   * 
+   * @example
+   * await user.attachWithPivot('permissions', [
+   *   { id: 1, pivotData: { level: 'read' } },
+   *   { id: 2, pivotData: { level: 'write' } }
+   * ]);
+   */
+  async attachWithPivot(relationName, records) {
+    if (!this.orm) {
+      throw new UltraORMError('Model must be registered with an ORM instance');
+    }
+
+    const association = this.constructor.associations[relationName];
+    if (!association) {
+      throw new UltraORMError(`Relationship "${relationName}" not found on model ${this.constructor.tableName}`);
+    }
+
+    if (association.type !== 'belongsToMany') {
+      throw new UltraORMError(`attachWithPivot() can only be used with belongsToMany relationships`);
+    }
+
+    const through = typeof association.through === 'string' 
+      ? association.through 
+      : (association.through.tableName || association.through);
+    
+    const foreignKey = association.foreignKey;
+    const otherKey = association.otherKey;
+    const sourceKey = association.sourceKey || 'id';
+    
+    const instanceId = this.get(sourceKey);
+    if (!instanceId) {
+      throw new UltraORMError('Cannot attach relations on an unsaved record');
+    }
+
+    // Get existing attachments
+    const existingRecords = await this._getAttachedIds(through, foreignKey, otherKey, instanceId);
+    
+    const recordsToInsert = [];
+    for (const record of records) {
+      const relatedId = typeof record === 'object' ? record.id : record;
+      const pivotData = typeof record === 'object' ? record.pivotData || {} : {};
+      
+      if (!existingRecords.includes(String(relatedId))) {
+        const insertRecord = {
+          [foreignKey]: instanceId,
+          [otherKey]: relatedId,
+          ...pivotData
+        };
+        recordsToInsert.push(insertRecord);
+      }
+    }
+
+    if (recordsToInsert.length === 0) {
+      console.log(`[UltraORM] All ${relationName} already attached`);
+      return 0;
+    }
+
+    return await this._insertJunctionRecords(through, recordsToInsert);
+  }
+
+  /**
+   * Create junction table for belongsToMany relationship
+   * 
+   * @param {string} relationName - Name of the belongsToMany relationship
+   * @param {Object} extraFields - Extra fields for the junction table
+   * @returns {Promise<void>}
+   * 
+   * @example
+   * // Create junction table with extra field
+   * await User.createJunctionTable('roles', {
+   *   assignedAt: new DateTimeField({ autoNowAdd: true })
+   * });
+   */
+  static async createJunctionTable(relationName, extraFields = {}) {
+    if (!this.orm) {
+      throw new UltraORMError('Model must be registered with an ORM instance');
+    }
+
+    const association = this.associations[relationName];
+    if (!association) {
+      throw new UltraORMError(`Relationship "${relationName}" not found on model ${this.tableName}`);
+    }
+
+    if (association.type !== 'belongsToMany') {
+      throw new UltraORMError(`createJunctionTable() can only be used with belongsToMany relationships`);
+    }
+
+    const through = typeof association.through === 'string' 
+      ? association.through 
+      : (association.through.tableName || association.through);
+    
+    const foreignKey = association.foreignKey;
+    const otherKey = association.otherKey;
+
+    // Check if table already exists
+    const exists = await this.orm.adapter.tableExists(through);
+    if (exists) {
+      console.log(`[UltraORM] Junction table ${through} already exists`);
+      return;
+    }
+
+    // Build create table SQL
+    const fields = [
+      `${foreignKey} INT NOT NULL`,
+      `${otherKey} INT NOT NULL`
+    ];
+
+    // Add extra fields
+    for (const [fieldName, field] of Object.entries(extraFields)) {
+      if (field instanceof Field) {
+        fields.push(field.getSQLDefinition(fieldName, this.orm.config.type));
+      } else {
+        fields.push(`${fieldName} TEXT`);
+      }
+    }
+
+    // Add primary key (composite)
+    fields.push(`PRIMARY KEY (${foreignKey}, ${otherKey})`);
+
+    // Add foreign keys
+    const sourceTable = this.tableName;
+    const targetModel = typeof association.target === 'string' 
+      ? association.target 
+      : association.target.tableName;
+    
+    const sql = `CREATE TABLE ${through} (${fields.join(', ')})`;
+    
+    try {
+      await this.orm.adapter.execute(sql);
+      console.log(`✅ Created junction table: ${through}`);
+      
+      // Add foreign key constraints if supported
+      const dbType = this.orm.config.type;
+      if (dbType !== 'mongodb') {
+        try {
+          await this.orm.adapter.execute(
+            `ALTER TABLE ${through} ADD CONSTRAINT fk_${through}_${foreignKey} FOREIGN KEY (${foreignKey}) REFERENCES ${sourceTable}(id) ON DELETE CASCADE`
+          );
+          await this.orm.adapter.execute(
+            `ALTER TABLE ${through} ADD CONSTRAINT fk_${through}_${otherKey} FOREIGN KEY (${otherKey}) REFERENCES ${targetModel}(id) ON DELETE CASCADE`
+          );
+        } catch (fkError) {
+          console.warn(`[UltraORM] Could not add foreign key constraints to ${through}: ${fkError.message}`);
+        }
+      }
+    } catch (error) {
+      throw new DatabaseError(`Failed to create junction table ${through}: ${error.message}`, error);
+    }
+  }
+
+  // ==================== PRIVATE HELPER METHODS ====================
+
+  /**
+   * Normalize IDs to array of strings/numbers
+   * @private
+   */
+  _normalizeIds(ids) {
+    if (ids === null || ids === undefined) {
+      return [];
+    }
+    
+    if (!Array.isArray(ids)) {
+      ids = [ids];
+    }
+    
+    return ids.map(id => {
+      if (id === null || id === undefined) {
+        return null;
+      }
+      // Extract ID from model instances or objects
+      if (typeof id === 'object') {
+        return id.id || id._id || id[Object.keys(id)[0]];
+      }
+      return id;
+    }).filter(id => id !== null && id !== undefined);
+  }
+
+  /**
+   * Get attached IDs for junction table
+   * @private
+   */
+  async _getAttachedIds(through, foreignKey, otherKey, instanceId) {
+    const dbType = this.orm.config.type;
+    
+    if (dbType === 'mongodb') {
+      const db = this.orm.adapter.client.db(this.orm.config.database);
+      const collection = db.collection(through);
+      const records = await collection.find({ [foreignKey]: instanceId }).toArray();
+      return records.map(r => String(r[otherKey]));
+    } else {
+      const sql = `SELECT ${otherKey} FROM ${through} WHERE ${foreignKey} = ?`;
+      const { rows } = await this.orm.adapter.execute(sql, [instanceId]);
+      return rows.map(r => String(r[otherKey]));
+    }
+  }
+
+  /**
+   * Insert records into junction table
+   * @private
+   */
+  async _insertJunctionRecords(through, records) {
+    if (records.length === 0) return 0;
+
+    const dbType = this.orm.config.type;
+    
+    if (dbType === 'mongodb') {
+      const db = this.orm.adapter.client.db(this.orm.config.database);
+      const collection = db.collection(through);
+      const result = await collection.insertMany(records);
+      console.log(`[UltraORM] Attached ${result.insertedCount} records to junction table ${through}`);
+      return result.insertedCount;
+    }
+
+    // SQL database
+    const columns = Object.keys(records[0]);
+    const placeholders = records.map(() => `(${columns.map(() => '?').join(', ')})`);
+    const values = records.flatMap(r => columns.map(c => r[c]));
+
+    const sql = `INSERT INTO ${through} (${columns.join(', ')}) VALUES ${placeholders.join(', ')}`;
+    
+    try {
+      const { result } = await this.orm.adapter.execute(sql, values);
+      const insertedCount = result?.affectedRows || records.length;
+      console.log(`[UltraORM] Attached ${insertedCount} records to junction table ${through}`);
+      return insertedCount;
+    } catch (error) {
+      // Handle duplicate key error gracefully
+      if (error.code === 'ER_DUP_ENTRY' || error.code === '23505' || error.message.includes('duplicate key')) {
+        console.warn(`[UltraORM] Some records were already attached, skipping duplicates`);
+        return 0;
+      }
+      throw error;
+    }
   }
 }
 
@@ -4986,6 +6182,7 @@ module.exports = {
   SmallIntegerField,
   TinyIntegerField,
   DecimalField,
+  FloatField,
   StringField,
   CharField,
   TextField,
@@ -4999,10 +6196,11 @@ module.exports = {
   DateTimeField,
   BooleanField,
   JSONField,
-  FloatField,
   BinaryField,
   ForeignKey,
   OneToOneField,
+  MoneyField,
+  MoneyValue,
 
   // Query operators
   QUERY_OPERATORS,

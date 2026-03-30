@@ -84,6 +84,8 @@ const {
   Field,
   IntegerField,
   BigIntegerField,
+  SmallIntegerField,
+  TinyIntegerField,
   StringField,
   CharField,
   TextField,
@@ -409,7 +411,10 @@ if (runTest('JSONField: JSON validation', () => {
   const field = new JSONField();
   field.validate({ key: 'value' });
   field.validate([1, 2, 3]);
-  assertThrows(() => field.validate('not-json'), ValidationError);
+  // Circular reference cannot be JSON serialized
+  const circular = {};
+  circular.self = circular;
+  assertThrows(() => field.validate(circular), ValidationError);
 })) testsPassed++; else testsFailed++;
 
 if (runTest('JSONField: prepareValue and fromDatabase', () => {
@@ -699,11 +704,13 @@ if (runTest('Model: Validate method', () => {
 })) testsPassed++; else testsFailed++;
 
 if (runTest('Model: Validate throws on invalid', () => {
-  const user = new TestUser({
-    name: 'John',
-    email: 'invalid-email' // Invalid email
-  });
-  assertThrows(() => user.validate(), ValidationError);
+  // Validation happens during construction via set()
+  assertThrows(() => {
+    new TestUser({
+      name: 'John',
+      email: 'invalid-email' // Invalid email - fails EmailField pattern validation
+    });
+  }, ValidationError);
 })) testsPassed++; else testsFailed++;
 
 // Test: Model fill method

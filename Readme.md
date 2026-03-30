@@ -69,6 +69,7 @@ UltraORM is a comprehensive, multi-database Object-Relational Mapping library fo
 - ✅ Date/Time fields with auto timestamps
 - ✅ Foreign keys with cascade options
 - ✅ One-to-One fields
+- ✅ MoneyField with currency support and precision handling
 
 ### Query Builder
 - ✅ Chainable QuerySet API
@@ -87,6 +88,7 @@ UltraORM is a comprehensive, multi-database Object-Relational Mapping library fo
 - ✅ One-to-One
 - ✅ One-to-Many
 - ✅ Many-to-Many (with pivot table)
+- ✅ Many-to-Many with attach/detach/sync methods
 - ✅ Has-Many-Through
 - ✅ Self-referential
 - ✅ Polymorphic (morphMany, morphOne)
@@ -293,6 +295,7 @@ const orm = new UltraORM({
 | `BinaryField` | Binary data | BLOB |
 | `ForeignKey` | Foreign key | INT |
 | `OneToOneField` | One-to-one | INT |
+| `MoneyField` | Monetary values | BIGINT/DECIMAL |
 
 ### Field Options
 
@@ -336,7 +339,71 @@ new ForeignKey(User, { onDelete: 'CASCADE' })
 
 // Enum
 new EnumField({ values: ['active', 'inactive', 'pending'] })
+
+// Money field (stores as cents internally for precision)
+new MoneyField({ currency: 'USD' })
+new MoneyField({ currency: 'EUR', minValue: 0, maxValue: 1000000 })
+new MoneyField({ currency: 'BTC', storeAsCents: false, precision: 20, scale: 8 })
 ```
+
+### MoneyField & MoneyValue
+
+UltraORM provides dedicated support for monetary values with the `MoneyField` and `MoneyValue` classes:
+
+```javascript
+const { Model, MoneyField, MoneyValue } = require('ultraorm');
+
+class Product extends Model {
+  static tableName = 'products';
+  static fields = {
+    id: new IntegerField({ primaryKey: true }),
+    name: new StringField({ nullable: false }),
+    price: new MoneyField({ currency: 'USD', minValue: 0 }),
+    weight: new MoneyField({ currency: 'kg', storeAsCents: false, precision: 10, scale: 3 })
+  };
+}
+
+// Working with MoneyValue
+const price = new MoneyValue(19.99, 'USD');
+const total = price.add(new MoneyValue(5.00, 'USD'));
+console.log(total.format()); // '$24.99'
+
+// In models, values are automatically converted to MoneyValue
+const product = await Product.findOne({ id: 1 });
+const displayPrice = product.get('price').format(); // '$19.99'
+const amount = product.get('price').amount; // 19.99
+
+// Arithmetic operations
+const discount = new MoneyValue(5, 'USD');
+const finalPrice = price.subtract(discount);
+console.log(finalPrice.toCents()); // 1499 (in cents)
+```
+
+**MoneyField Options:**
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `currency` | string | 'USD' | Currency code (ISO 4217) |
+| `precision` | number | 19 | Total digits |
+| `scale` | number | 2 | Decimal places |
+| `minValue` | number | null | Minimum allowed value |
+| `maxValue` | number | null | Maximum allowed value |
+| `storeAsCents` | boolean | true | Store as integer cents |
+
+**MoneyValue Methods:**
+
+| Method | Description |
+|--------|-------------|
+| `add(other)` | Add another MoneyValue |
+| `subtract(other)` | Subtract another MoneyValue |
+| `multiply(factor)` | Multiply by a number |
+| `divide(divisor)` | Divide by a number |
+| `equals(other)` | Check equality |
+| `greaterThan(other)` | Compare greater than |
+| `lessThan(other)` | Compare less than |
+| `format(options)` | Format as currency string |
+| `toCents()` | Convert to integer cents |
+| `toJSON()` | Convert to object |
 
 ---
 
@@ -761,6 +828,72 @@ console.log(user.roles.map(r => r.name))
 const role = await Role.query().include('users').first()
 console.log(role.users.map(u => u.name))
 ```
+
+#### Many-to-Many Instance Methods
+
+UltraORM provides convenient methods for managing many-to-many relationships:
+
+```javascript
+// Assume user is a saved User instance with belongsToMany('roles')
+
+// Attach roles to user
+await user.attach('roles', [1, 2, 3]);
+await user.attach('roles', roleInstance); // Can also pass model instances
+
+// Attach with pivot data
+await user.attach('roles', [1, 2], { assignedAt: new Date() });
+
+// Attach with unique pivot data per record
+await user.attachWithPivot('roles', [
+  { id: 1, pivotData: { role: 'admin' } },
+  { id: 2, pivotData: { role: 'editor' } }
+]);
+
+// Detach roles from user
+await user.detach('roles', [1, 2]); // Detach specific roles
+await user.detach('roles'); // Detach all roles
+
+// Sync roles (replace all attachments)
+await user.sync('roles', [2, 3]); // Removes 1, keeps 2, adds 3
+
+// Toggle roles (attach if not attached, detach if attached)
+const { attached, detached } = await user.toggle('roles', [1, 2]);
+console.log(`Attached: ${attached}, Detached: ${detached}`);
+
+// Check if user has a role
+const hasAdmin = await user.hasAttached('roles', 1);
+console.log(`User is admin: ${hasAdmin}`);
+
+// Get pivot data for an attachment
+const pivot = await user.getPivot('roles', 1);
+console.log(`Role assigned at: ${pivot.assignedAt}`);
+
+// Update pivot data
+await user.updatePivot('roles', 1, { role: 'superadmin' });
+```
+
+#### Auto-create Junction Tables
+
+You can automatically create junction tables with extra fields:
+
+```javascript
+// Create junction table with extra fields
+await User.createJunctionTable('roles', {
+  assignedAt: new DateTimeField({ autoNowAdd: true }),
+  assignedBy: new IntegerField()
+});
+```
+
+| Method | Description |
+|--------|-------------|
+| `attach(relation, ids, pivotData)` | Attach related records |
+| `detach(relation, ids)` | Detach related records |
+| `sync(relation, ids, pivotData)` | Replace all attachments |
+| `toggle(relation, ids)` | Toggle attachment state |
+| `hasAttached(relation, id)` | Check if related record is attached |
+| `getPivot(relation, id)` | Get pivot data for attachment |
+| `updatePivot(relation, id, data)` | Update pivot data |
+| `attachWithPivot(relation, records)` | Attach with unique pivot data |
 
 ### Has-Many-Through
 
