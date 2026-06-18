@@ -284,14 +284,19 @@ class Field {
     let parts = [escapeIdentifier(fieldName, adapterType), dbType];
 
     if (this.autoIncrement && adapterType === 'postgres') {
+      // PATCH (test harness): original code only emitted `SERIAL` and skipped
+      // the PRIMARY KEY clause because of `&& !this.autoIncrement` below.
+      // On real Postgres this creates a column with a sequence but no PK
+      // constraint, which then breaks every FOREIGN KEY ... REFERENCES on it.
+      // Fix: emit `SERIAL PRIMARY KEY` together.
       parts = [escapeIdentifier(fieldName, adapterType), 'SERIAL'];
     }
-    
+
     if (this.autoIncrement && adapterType === 'mysql') {
       parts.push('AUTO_INCREMENT');
     }
 
-    if (this.primaryKey && !this.autoIncrement) {
+    if (this.primaryKey) {
       parts.push('PRIMARY KEY');
     }
 
