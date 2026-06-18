@@ -1,12 +1,15 @@
 {
   "name": "ultraorm",
-  "version": "2.0.0",
-  "description": "The Ultimate Node.js ORM - Write once, run anywhere. PostgreSQL, MySQL, MongoDB support with Django-like ease",
+  "version": "2.1.0",
+  "description": "The Ultimate Node.js ORM - Write once, run anywhere. PostgreSQL, MySQL, MongoDB support with Django-like ease. v2.1.0 ships critical bug fixes for Postgres schema generation, MoneyField corruption, belongsToMany eager loading, polymorphic relations, and identifier escaping.",
   "main": "bootstrap-orm.js",
   "module": "ultra-orm.js",
   "types": "ultra-orm.d.ts",
   "scripts": {
-    "test": "node tests/full_test.js",
+    "test": "node tests/runner.js",
+    "test:unit": "node tests/unit.test.js",
+    "test:integration": "node tests/integration.test.js",
+    "test:performance": "node tests/performance.test.js",
     "migrate": "node -e \"require('./bootstrap-orm').migrate()\"",
     "migrate:make": "node -e \"require('./bootstrap-orm').makeMigration(process.argv[2])\"",
     "migrate:run": "node -e \"require('./bootstrap-orm').migrateRun()\"",
@@ -54,6 +57,7 @@
     "mongodb": "^5.9.0"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.0",
     "jsdoc": "^4.0.0",
     "eslint": "^8.50.0"
   },

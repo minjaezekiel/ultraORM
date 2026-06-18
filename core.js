@@ -30,8 +30,8 @@
  * │  - Instance methods for CRUD operations (save, delete, update)         │
  * │  - Relationship definitions (hasMany, belongsTo, etc.)                 │
  * │                                                                          │
- * │  🔹 IMPORTANT: To add new query methods, modify this class.             │
- * │  🔹 Relationships are defined via static methods.                      │
+ * │  * IMPORTANT: To add new query methods, modify this class.             │
+ * │  * Relationships are defined via static methods.                      │
  * └─────────────────────────────────────────────────────────────────────────┘
  *                                    │
  *                                    ▼
@@ -41,8 +41,8 @@
  * │  Chainable query builder for complex database queries.                  │
  * │  Methods: where(), order(), include(), take(), skip(), paginate()       │
  * │                                                                          │
- * │  🔹 IMPORTANT: Add new query methods here.                               │
- * │  🔹 Query optimization goes here.                                       │
+ * │  * IMPORTANT: Add new query methods here.                               │
+ * │  * Query optimization goes here.                                       │
  * └─────────────────────────────────────────────────────────────────────────┘
  *                                    │
  *                                    ▼
@@ -55,8 +55,8 @@
  * │  - Transaction management                                               │
  * │  - Database-specific SQL translation                                   │
  * │                                                                          │
- * │  🔹 IMPORTANT: Add new database adapters here.                          │
- * │  🔹 SQL generation and placeholders handled here.                       │
+ * │  * IMPORTANT: Add new database adapters here.                          │
+ * │  * SQL generation and placeholders handled here.                       │
  * └─────────────────────────────────────────────────────────────────────────┘
  *                                    │
  *                                    ▼
@@ -70,7 +70,7 @@
  * │  - Seeding functionality                                                │
  * │  - Data transfer between databases                                      │
  * │                                                                          │
- * │  🔹 IMPORTANT: Add new ORM-level features here.                         │
+ * │  * IMPORTANT: Add new ORM-level features here.                         │
  * └─────────────────────────────────────────────────────────────────────────┘
  * 
  * ================================================================================
@@ -283,16 +283,14 @@ class Field {
     let dbType = this.dbType || 'TEXT';
     let parts = [escapeIdentifier(fieldName, adapterType), dbType];
 
+    // [FIX v2.1.0 - BUG-01] Original code skipped PRIMARY KEY when
+    // autoIncrement was true (the canonical PK declaration). This produced
+    // `id SERIAL NOT NULL` with no PK constraint, which silently broke every
+    // FOREIGN KEY ... REFERENCES on Postgres. Fix: always emit PRIMARY KEY
+    // when primaryKey is true, regardless of autoIncrement.
     if (this.autoIncrement && adapterType === 'postgres') {
-      // PATCH (test harness): original code only emitted `SERIAL` and skipped
-      // the PRIMARY KEY clause because of `&& !this.autoIncrement` below.
-      // On real Postgres this creates a column with a sequence but no PK
-      // constraint, which then breaks every FOREIGN KEY ... REFERENCES on it.
-      // Fix: emit `SERIAL PRIMARY KEY` together.
       parts = [escapeIdentifier(fieldName, adapterType), 'SERIAL'];
-    }
-
-    if (this.autoIncrement && adapterType === 'mysql') {
+    } else if (this.autoIncrement && adapterType === 'mysql') {
       parts.push('AUTO_INCREMENT');
     }
 
@@ -304,14 +302,15 @@ class Field {
       parts.push('NOT NULL');
     }
 
-    if (this.unique) {
+    if (this.unique && !this.primaryKey) {
+      // UNIQUE omitted when already PRIMARY KEY (PG/MySQL both treat PK as unique)
       parts.push('UNIQUE');
     }
 
     if (this.default !== undefined && this.default !== null) {
-      const defaultValue = typeof this.default === 'function' 
-        ? this.default() 
-        : (typeof this.default === 'string' ? `'${this.default}'` : this.default);
+      const defaultValue = typeof this.default === 'function'
+        ? this.default()
+        : (typeof this.default === 'string' ? `'${this.default.replace(/'/g, "''")}'` : this.default);
       parts.push(`DEFAULT ${defaultValue}`);
     }
 
@@ -2120,12 +2119,15 @@ class QuerySet {
     }
 
     const whereClause = this._buildWhereClause();
+    const adapterType = this.model.orm.config.type;
+    // [FIX v2.1.0 - BUG-13] Escape table identifier in count/exists.
+    const escapedTable = escapeIdentifier(this.model.tableName, adapterType);
     const selectField = this._distinct ? 'DISTINCT ' + field : field;
-    let sql = `SELECT COUNT(${selectField}) as count FROM ${this.model.tableName}`;
-    
+    let sql = `SELECT COUNT(${selectField}) as count FROM ${escapedTable}`;
+
     if (whereClause.sql) sql += ` WHERE ${whereClause.sql}`;
     if (this._groupBy.length > 0) {
-      sql = `SELECT COUNT(*) as count FROM (SELECT ${this._selectFields.join(', ')} FROM ${this.model.tableName}`;
+      sql = `SELECT COUNT(*) as count FROM (SELECT ${this._selectFields.join(', ')} FROM ${escapedTable}`;
       if (whereClause.sql) sql += ` WHERE ${whereClause.sql}`;
       sql += ` GROUP BY ${this._groupBy.join(', ')}`;
       if (this._having.length > 0) {
@@ -2141,9 +2143,9 @@ class QuerySet {
 
   /**
    * Check if any records exist
-   * 
+   *
    * @returns {Promise<boolean>} - True if records exist
-   * 
+   *
    * @example
    * const exists = await User.query().where({ email }).exists();
    */
@@ -2151,7 +2153,9 @@ class QuerySet {
     this._selectFields = ['1'];
     this._limit = 1;
     const whereClause = this._buildWhereClause();
-    let sql = `SELECT 1 FROM ${this.model.tableName}`;
+    const adapterType = this.model.orm.config.type;
+    const escapedTable = escapeIdentifier(this.model.tableName, adapterType);
+    let sql = `SELECT 1 FROM ${escapedTable}`;
     if (whereClause.sql) sql += ` WHERE ${whereClause.sql}`;
     sql += ' LIMIT 1';
 
@@ -2588,9 +2592,11 @@ class QuerySet {
   async _executeSQL() {
     const adapterType = this.model.orm.config.type;
     const whereClause = this._buildWhereClause();
-    
-    let sql = `SELECT ${this._distinct ? 'DISTINCT ' : ''}${this._selectFields.join(', ')} FROM ${this.model.tableName}`;
-    
+    // [FIX v2.1.0 - BUG-13] Escape table identifier.
+    const escapedTable = escapeIdentifier(this.model.tableName, adapterType);
+
+    let sql = `SELECT ${this._distinct ? 'DISTINCT ' : ''}${this._selectFields.join(', ')} FROM ${escapedTable}`;
+
     if (whereClause.sql) sql += ` WHERE ${whereClause.sql}`;
     if (this._groupBy.length > 0) sql += ` GROUP BY ${this._groupBy.join(', ')}`;
     if (this._having.length > 0) sql += ` HAVING ${this._having.join(' AND ')}`;
@@ -2602,7 +2608,7 @@ class QuerySet {
 
     const { rows } = await this.model.orm.adapter.execute(sql, whereClause.values);
     return rows.map(row => {
-      const instance = new this.model(row);
+      const instance = new this.model(row, { fromDatabase: true });
       instance.isNew = false;
       return instance;
     });
@@ -2689,12 +2695,25 @@ class QuerySet {
         await this._loadHasMany(instances, assoc, includeName);
       } else if (assoc.type === 'hasOne') {
         await this._loadHasOne(instances, assoc, includeName);
-      } else if (assoc.type === 'belongsToMany' || assoc.type === 'hasManyThrough') {
+      } else if (assoc.type === 'belongsToMany') {
         await this._loadBelongsToMany(instances, assoc, includeName);
+      } else if (assoc.type === 'hasManyThrough') {
+        // [FIX v2.1.0 - BUG-06] hasManyThrough was routed to _loadBelongsToMany,
+        // which uses `foreignKey` + `otherKey` — but hasManyThrough has different
+        // semantics: it goes Source -> Through.foreignKey -> Through.throughKey
+        // matches Source.id, then Through.targetKey matches Target.id. The
+        // original routing silently returned wrong results.
+        await this._loadHasManyThrough(instances, assoc, includeName);
       } else if (assoc.type === 'morphMany' || assoc.type === 'morphOne') {
         await this._loadPolymorphic(instances, assoc, includeName);
       } else if (assoc.type === 'morphTo') {
         await this._loadMorphTo(instances, assoc, includeName);
+      } else if (assoc.type === 'morphToMany') {
+        // [FIX v2.1.0 - BUG-05] morphToMany and morphedByMany were defined
+        // but never dispatched by _eagerLoad — include() silently did nothing.
+        await this._loadMorphToMany(instances, assoc, includeName);
+      } else if (assoc.type === 'morphedByMany') {
+        await this._loadMorphedByMany(instances, assoc, includeName);
       }
     }
   }
@@ -2806,9 +2825,15 @@ class QuerySet {
 
     let junctionRecords;
     if (typeof through === 'string') {
+      // [FIX v2.1.0 - BUG-11] Escape identifiers to prevent SQL injection
+      // when `through` is passed as a string. Original code interpolated
+      // raw ${through} and ${foreignKey} into SQL.
+      const adapterType = this.model.orm?.config?.type || 'mysql';
+      const escapedThrough = escapeIdentifier(through, adapterType);
+      const escapedFK = escapeIdentifier(foreignKey, adapterType);
       const placeholders = sourceIds.map(() => '?').join(',');
       const { rows } = await this.model.orm.adapter.execute(
-        `SELECT * FROM ${through} WHERE ${foreignKey} IN (${placeholders})`,
+        `SELECT * FROM ${escapedThrough} WHERE ${escapedFK} IN (${placeholders})`,
         sourceIds
       );
       junctionRecords = rows;
@@ -2823,10 +2848,18 @@ class QuerySet {
       return;
     }
 
-    const targetIds = [...new Set(junctionRecords.map(r => r[otherKey]))];
+    // [FIX v2.1.0 - BUG-04] Original code used `r[otherKey]` / `jr[foreignKey]`
+    // which only works for plain objects. When `through` is a Model class
+    // (the common case), `through.find(where)` returns Model instances whose
+    // field values are accessed via `.get(fieldName)`. Direct property
+    // access returns `undefined`, so targetIds was empty and every
+    // belongsToMany include() silently returned `[]`.
+    const getVal = (r, k) => (r && typeof r.get === 'function' ? r.get(k) : (r ? r[k] : undefined));
+
+    const targetIds = [...new Set(junctionRecords.map(r => getVal(r, otherKey)))];
     const targetWhere = { id: targetIds.length === 1 ? targetIds[0] : targetIds };
     const targetRecords = await target.find(targetWhere);
-    
+
     const targetMap = new Map();
     for (const tr of targetRecords) {
       targetMap.set(String(tr.get('id')), tr);
@@ -2834,8 +2867,8 @@ class QuerySet {
 
     const groups = {};
     for (const jr of junctionRecords) {
-      const sourceId = String(jr[foreignKey]);
-      const targetId = String(jr[otherKey]);
+      const sourceId = String(getVal(jr, foreignKey));
+      const targetId = String(getVal(jr, otherKey));
       if (!groups[sourceId]) groups[sourceId] = [];
       if (targetMap.has(targetId)) {
         groups[sourceId].push(targetMap.get(targetId));
@@ -2927,6 +2960,256 @@ class QuerySet {
       for (const item of items) {
         item.inst[includeName] = map.get(String(item.id)) || null;
       }
+    }
+  }
+
+  /**
+   * Load hasManyThrough relation
+   *
+   * [FIX v2.1.0 - BUG-06] This loader is new. The original code routed
+   * hasManyThrough to _loadBelongsToMany, which used `foreignKey` + `otherKey`
+   * semantics. But hasManyThrough has a different shape:
+   *
+   *   Source.id  ->  Through.foreignKey  (which row in through belongs to this source)
+   *   Through.throughKey  ->  Target.id  (which target does that through row point to)
+   *
+   * The `targetKey` option from the user is the column on `through` that
+   * points to the target (default: `<target>_id`). The `throughKey` option
+   * is the column on `through` that points back to source (default: `id`
+   * — but typically you'd set it to the source's PK name).
+   */
+  async _loadHasManyThrough(instances, assoc, includeName) {
+    const target = assoc.target;
+    const through = assoc.through;
+    const foreignKey = assoc.foreignKey;       // on `through`, points to source
+    const throughKey = assoc.throughKey || 'id'; // on `through`, points to source (usually the source's PK column)
+    const targetKey = assoc.targetKey;         // on `through`, points to target
+    const sourceKey = assoc.sourceKey || 'id';
+
+    const sourceIds = [...new Set(instances.map(i => i.get(sourceKey)).filter(v => v !== null && v !== undefined))];
+    if (sourceIds.length === 0) {
+      for (const inst of instances) inst[includeName] = [];
+      return;
+    }
+
+    // Step 1: fetch junction (through) rows where foreignKey IN sourceIds
+    let junctionRecords;
+    if (typeof through === 'string') {
+      const adapterType = this.model.orm?.config?.type || 'mysql';
+      const placeholders = sourceIds.map(() => '?').join(',');
+      const { rows } = await this.model.orm.adapter.execute(
+        `SELECT * FROM ${through} WHERE ${foreignKey} IN (${placeholders})`,
+        sourceIds
+      );
+      junctionRecords = rows;
+    } else {
+      const where = {};
+      where[foreignKey] = sourceIds.length === 1 ? sourceIds[0] : sourceIds;
+      junctionRecords = await through.find(where);
+    }
+
+    if (!junctionRecords.length) {
+      for (const inst of instances) inst[includeName] = [];
+      return;
+    }
+
+    // Step 2: collect target IDs from junction rows (using targetKey)
+    const getVal = (r, k) => (r && typeof r.get === 'function' ? r.get(k) : (r ? r[k] : undefined));
+    const targetIds = [...new Set(junctionRecords.map(r => getVal(r, throughKey)).filter(v => v !== null && v !== undefined))];
+    if (targetIds.length === 0) {
+      for (const inst of instances) inst[includeName] = [];
+      return;
+    }
+
+    // Step 3: fetch target records.
+    // targetKey is the column on the TARGET model that matches throughKey on
+    // the through model. Typically targetKey = '<target>_id' (FK on target
+    // pointing back to through) — but if the target's PK *is* the FK
+    // (e.g. Profile.user_id is the PK), then we query by targetKey.
+    // We use target.find({ [targetKey]: targetIds }) which builds proper IN clause.
+    const targetWhere = {};
+    targetWhere[targetKey] = targetIds.length === 1 ? targetIds[0] : targetIds;
+    const targetRecords = await target.find(targetWhere);
+
+    // [FIX v2.1.0 - BUG-06 follow-up] When multiple target records share the
+    // same targetKey value (e.g. 2 posts from the same user), we must index
+    // them as a list, not overwrite. Use Map<key, Array<target>>.
+    const targetMap = new Map();
+    const addTarget = (key, tr) => {
+      const k = String(key);
+      if (!targetMap.has(k)) targetMap.set(k, []);
+      targetMap.get(k).push(tr);
+    };
+    for (const tr of targetRecords) {
+      addTarget(getVal(tr, targetKey), tr);
+      if (targetKey !== 'id') {
+        addTarget(tr.get('id'), tr);
+      }
+    }
+
+    // Step 4: group target records by their owning source instance.
+    // Each through row links source.foreignKeyVal -> target.throughKeyVal.
+    const groups = {};
+    for (const jr of junctionRecords) {
+      const sourceId = String(getVal(jr, foreignKey));
+      const throughIdVal = String(getVal(jr, throughKey));
+      if (!groups[sourceId]) groups[sourceId] = [];
+      const trList = targetMap.get(throughIdVal) || [];
+      for (const tr of trList) {
+        groups[sourceId].push(tr);
+      }
+    }
+
+    for (const inst of instances) {
+      const id = String(inst.get(sourceKey));
+      inst[includeName] = groups[id] || [];
+    }
+  }
+
+  /**
+   * Load morphToMany relation (polymorphic many-to-many).
+   *
+   * [FIX v2.1.0 - BUG-05] New loader. Post.morphToMany(Tag, { through: Taggable,
+   * morphName: 'taggable', foreignKey: 'tag_id', as: 'tags' }) means:
+   *   - through has columns: foreignKey (-> Tag), morphType (e.g. 'taggable_type'), morphId (e.g. 'taggable_id')
+   *   - For each Post instance, find through rows where morphType = 'posts' AND morphId = post.id
+   *   - Then fetch Tag rows by through.foreignKey
+   */
+  async _loadMorphToMany(instances, assoc, includeName) {
+    const target = assoc.target;
+    const through = assoc.through;
+    const morphType = assoc.morphType;
+    const morphId = assoc.morphId;
+    const foreignKey = assoc.foreignKey; // on `through`, points to target
+    const sourceType = this.model.tableName;
+
+    const sourceIds = [...new Set(instances.map(i => i.get('id')).filter(v => v !== null && v !== undefined))];
+    if (sourceIds.length === 0) {
+      for (const inst of instances) inst[includeName] = [];
+      return;
+    }
+
+    // Step 1: fetch junction rows where morphType = sourceType AND morphId IN sourceIds
+    let junctionRecords;
+    if (typeof through === 'string') {
+      const placeholders = sourceIds.map(() => '?').join(',');
+      const sql = `SELECT * FROM ${through} WHERE ${morphType} = ? AND ${morphId} IN (${placeholders})`;
+      const { rows } = await this.model.orm.adapter.execute(sql, [sourceType, ...sourceIds]);
+      junctionRecords = rows;
+    } else {
+      const where = {
+        [morphType]: sourceType,
+        [morphId]: sourceIds.length === 1 ? sourceIds[0] : sourceIds,
+      };
+      junctionRecords = await through.find(where);
+    }
+
+    if (!junctionRecords.length) {
+      for (const inst of instances) inst[includeName] = [];
+      return;
+    }
+
+    // Step 2: collect target IDs
+    const getVal = (r, k) => (r && typeof r.get === 'function' ? r.get(k) : (r ? r[k] : undefined));
+    const targetIds = [...new Set(junctionRecords.map(r => getVal(r, foreignKey)).filter(v => v !== null && v !== undefined))];
+
+    if (targetIds.length === 0) {
+      for (const inst of instances) inst[includeName] = [];
+      return;
+    }
+
+    // Step 3: fetch target records
+    const targetWhere = { id: targetIds.length === 1 ? targetIds[0] : targetIds };
+    const targetRecords = await target.find(targetWhere);
+    const targetMap = new Map();
+    for (const tr of targetRecords) {
+      targetMap.set(String(tr.get('id')), tr);
+    }
+
+    // Step 4: group by source instance
+    const groups = {};
+    for (const jr of junctionRecords) {
+      const sourceId = String(getVal(jr, morphId));
+      const targetId = String(getVal(jr, foreignKey));
+      if (!groups[sourceId]) groups[sourceId] = [];
+      const tr = targetMap.get(targetId);
+      if (tr) groups[sourceId].push(tr);
+    }
+    for (const inst of instances) {
+      inst[includeName] = groups[String(inst.get('id'))] || [];
+    }
+  }
+
+  /**
+   * Load morphedByMany relation (inverse of morphToMany).
+   *
+   * [FIX v2.1.0 - BUG-05] New loader. Tag.morphedByMany(Post, { through: Taggable,
+   * morphName: 'taggable', foreignKey: 'tag_id', as: 'posts' }) means:
+   *   - For each Tag instance, find through rows where foreignKey = tag.id
+   *   - Then fetch Post rows by through.morphId (filtered by through.morphType = 'posts')
+   */
+  async _loadMorphedByMany(instances, assoc, includeName) {
+    const target = assoc.target;
+    const through = assoc.through;
+    const morphType = assoc.morphType;
+    const morphId = assoc.morphId;
+    const foreignKey = assoc.foreignKey; // on `through`, points to source (this model)
+    const targetType = target.tableName;
+
+    const sourceIds = [...new Set(instances.map(i => i.get('id')).filter(v => v !== null && v !== undefined))];
+    if (sourceIds.length === 0) {
+      for (const inst of instances) inst[includeName] = [];
+      return;
+    }
+
+    // Step 1: fetch junction rows where foreignKey IN sourceIds AND morphType = targetType
+    let junctionRecords;
+    if (typeof through === 'string') {
+      const placeholders = sourceIds.map(() => '?').join(',');
+      const sql = `SELECT * FROM ${through} WHERE ${foreignKey} IN (${placeholders}) AND ${morphType} = ?`;
+      const { rows } = await this.model.orm.adapter.execute(sql, [...sourceIds, targetType]);
+      junctionRecords = rows;
+    } else {
+      const where = {
+        [foreignKey]: sourceIds.length === 1 ? sourceIds[0] : sourceIds,
+        [morphType]: targetType,
+      };
+      junctionRecords = await through.find(where);
+    }
+
+    if (!junctionRecords.length) {
+      for (const inst of instances) inst[includeName] = [];
+      return;
+    }
+
+    // Step 2: collect target IDs
+    const getVal = (r, k) => (r && typeof r.get === 'function' ? r.get(k) : (r ? r[k] : undefined));
+    const targetIds = [...new Set(junctionRecords.map(r => getVal(r, morphId)).filter(v => v !== null && v !== undefined))];
+
+    if (targetIds.length === 0) {
+      for (const inst of instances) inst[includeName] = [];
+      return;
+    }
+
+    // Step 3: fetch target records
+    const targetWhere = { id: targetIds.length === 1 ? targetIds[0] : targetIds };
+    const targetRecords = await target.find(targetWhere);
+    const targetMap = new Map();
+    for (const tr of targetRecords) {
+      targetMap.set(String(tr.get('id')), tr);
+    }
+
+    // Step 4: group by source instance
+    const groups = {};
+    for (const jr of junctionRecords) {
+      const sourceId = String(getVal(jr, foreignKey));
+      const targetId = String(getVal(jr, morphId));
+      if (!groups[sourceId]) groups[sourceId] = [];
+      const tr = targetMap.get(targetId);
+      if (tr) groups[sourceId].push(tr);
+    }
+    for (const inst of instances) {
+      inst[includeName] = groups[String(inst.get('id'))] || [];
     }
   }
 
@@ -3111,23 +3394,33 @@ class DBAdapter {
    * @returns {Promise<Object>} - { id, result }
    */
   async insertReturning(table, data, primaryKey = 'id') {
+    // [FIX v2.1.0 - BUG-08] Original code:
+    //   1. Called this.pool.query directly, bypassing _convertPlaceholders.
+    //      This worked for Postgres (which used $N directly) but routed
+    //      MySQL-style `?` through unchanged on Postgres paths.
+    //   2. Did not escape table or column identifiers — SQL injection vector
+    //      if caller passed user-controlled identifiers (rare but possible).
+    //   3. Did not route through execute() so query-logging hooks (if any)
+    //      would miss these inserts.
+    // Fix: escape identifiers and route through execute() for consistency.
     const cols = Object.keys(data);
     const vals = Object.values(data);
+    const escapedTable = escapeIdentifier(table, this.type);
+    const escapedCols = cols.map((c) => escapeIdentifier(c, this.type)).join(', ');
+    const escapedPK = escapeIdentifier(primaryKey, this.type);
 
     if (this.type === 'postgres') {
       const placeholders = cols.map((_, i) => `$${i + 1}`).join(', ');
-      const sql = `INSERT INTO ${table} (${cols.join(',')}) VALUES (${placeholders}) RETURNING ${primaryKey}`;
-      const res = await this.pool.query(sql, vals);
-      return { [primaryKey]: res.rows[0]?.[primaryKey], result: res };
+      const sql = `INSERT INTO ${escapedTable} (${escapedCols}) VALUES (${placeholders}) RETURNING ${escapedPK}`;
+      const { rows, result } = await this.execute(sql, vals);
+      return { [primaryKey]: rows[0]?.[primaryKey], result };
     } else if (this.type === 'mysql') {
       const placeholders = cols.map(() => '?').join(', ');
-      const [result] = await this.pool.execute(
-        `INSERT INTO ${table} (${cols.join(',')}) VALUES (${placeholders})`,
-        vals
-      );
-      return { [primaryKey]: result.insertId, result };
+      const sql = `INSERT INTO ${escapedTable} (${escapedCols}) VALUES (${placeholders})`;
+      const { result } = await this.execute(sql, vals);
+      return { [primaryKey]: result?.insertId, result };
     }
-    
+
     throw new UltraORMError('insertReturning not supported for this DB');
   }
 
@@ -3547,44 +3840,106 @@ class DBAdapter {
  */
 class Model {
   // ==================== STATIC PROPERTIES ====================
-  
+
   /** @type {UltraORM|null} Reference to ORM instance */
   static orm = null;
-  
+
   /** @type {string} Database table name */
   static tableName = null;
-  
-  /** @type {Object} Field definitions */
-  static fields = {};
-  
-  /** @type {Array} Index definitions */
-  static indexes = [];
-  
-  /** @type {Object} Model options */
-  static options = {};
-  
-  /** @type {Object} Relationship definitions */
-  static associations = {};
+
+  // [FIX v2.1.0 - BUG-14] `static fields = {}` and `static associations = {}`
+  // are SHARED across all subclasses in JavaScript — `static` field
+  // initializers run once on the declaring class and are inherited (not
+  // re-evaluated) by subclasses. This means every model that extends Model
+  // writes to the same `fields` / `associations` / `options` objects, so
+  // defining `User.hasMany(Post, { as: 'posts' })` and later
+  // `Tag.morphedByMany(Post, { as: 'posts' })` would silently overwrite
+  // User.associations.posts (and vice versa).
+  //
+  // Fix: use per-class lazy initialization. The first time a subclass
+  // accesses these properties, it gets its own fresh object stored on the
+  // class itself (shadowing the inherited accessor).
+  //
+  // We can't use a static getter + setter because subclasses inherit the
+  // getter. Instead, we expose a private init helper that's called at the
+  // top of every method that mutates these properties.
+
+  /** @type {Object} Field definitions (per-class — see BUG-14 fix) */
+  static get fields() {
+    if (!Object.prototype.hasOwnProperty.call(this, '_fields')) {
+      this._fields = {};
+    }
+    return this._fields;
+  }
+  static set fields(v) { this._fields = v; }
+
+  /** @type {Array} Index definitions (per-class) */
+  static get indexes() {
+    if (!Object.prototype.hasOwnProperty.call(this, '_indexes')) {
+      this._indexes = [];
+    }
+    return this._indexes;
+  }
+  static set indexes(v) { this._indexes = v; }
+
+  /** @type {Object} Model options (per-class) */
+  static get options() {
+    if (!Object.prototype.hasOwnProperty.call(this, '_options')) {
+      this._options = {};
+    }
+    return this._options;
+  }
+  static set options(v) { this._options = v; }
+
+  /** @type {Object} Relationship definitions (per-class) */
+  static get associations() {
+    if (!Object.prototype.hasOwnProperty.call(this, '_associations')) {
+      this._associations = {};
+    }
+    return this._associations;
+  }
+  static set associations(v) { this._associations = v; }
 
   // ==================== INSTANCE PROPERTIES ====================
 
   /**
    * Create a new Model instance
    * @param {Object} data - Initial data
+   * @param {Object} [options]
+   * @param {boolean} [options.fromDatabase=false] - When true, skips
+   *   prepareValue() and validate() on the supplied data. Use this when
+   *   hydrating instances from database rows so values that are already in
+   *   storage form (e.g. MoneyField cents) are not re-converted.
    */
-  constructor(data = {}) {
+  constructor(data = {}, options = {}) {
     this.data = {};
     this.isNew = true;
     this._changes = new Set();
     this._originalData = {};
 
+    // [FIX v2.1.0 - BUG-03 follow-up] When hydrating from a DB row, the
+    // values are already in storage form (e.g. MoneyField is stored as
+    // integer cents). Calling set() → prepareValue() would re-convert
+    // (e.g. 1999 cents → treated as $1999 → 199900 cents), corrupting
+    // the data. The fromDatabase flag bypasses set() for raw assignment.
+    const fromDatabase = options.fromDatabase === true;
+
     // Initialize fields with defaults
     for (const [fieldName, field] of Object.entries(this.constructor.fields)) {
       if (data[fieldName] !== undefined) {
-        this.set(fieldName, data[fieldName]);
+        if (fromDatabase) {
+          // Raw assignment — values are already prepared
+          this.data[fieldName] = data[fieldName];
+        } else {
+          this.set(fieldName, data[fieldName]);
+        }
       } else if (field.default !== undefined) {
         const defaultValue = typeof field.default === 'function' ? field.default() : field.default;
-        this.set(fieldName, defaultValue);
+        if (fromDatabase) {
+          this.data[fieldName] = defaultValue;
+        } else {
+          this.set(fieldName, defaultValue);
+        }
       } else {
         this.data[fieldName] = null;
       }
@@ -3718,7 +4073,7 @@ class Model {
     if (!records || records.length === 0) return [];
 
     const dbType = this.orm.config.type;
-    
+
     if (dbType === 'mongodb') {
       const col = this.orm.adapter.client.db(this.orm.config.database).collection(this.tableName);
       const result = await col.insertMany(records);
@@ -3729,26 +4084,83 @@ class Model {
       });
     }
 
-    // For SQL databases
-    const columns = Object.keys(records[0]);
-    const values = records.map(r => Object.values(r));
-    
-    const placeholders = records.map(() => 
-      `(${columns.map(() => '?').join(', ')})`
-    ).join(', ');
+    // [FIX v2.1.0 - BUG-12] Two bugs in the original:
+    //   1. Did not call field.prepareValue() on values — same root cause as
+    //      BUG-03. MoneyField/DecimalField/DateField would be stored raw.
+    //   2. Assumed auto-increment IDs are contiguous starting at
+    //      `result.insertId`. This is true for MySQL but FALSE for Postgres
+    //      (which doesn't return insertId from a multi-row INSERT — you need
+    //      RETURNING). On Postgres the original code set every instance's
+    //      id to `0 + i` (because insertId is undefined → startId = 0),
+    //      producing garbage IDs.
+    // Fix: route through model constructor (which calls set() → prepareValue)
+    // and use RETURNING on Postgres to fetch real IDs.
 
-    const sql = `INSERT INTO ${this.tableName} (${columns.join(', ')}) VALUES ${placeholders}`;
-    const flatValues = values.flat();
+    // Build column list from the model's fields, EXCLUDING auto-increment
+    // primary keys (their value is null in new instances and would violate
+    // NOT NULL on Postgres SERIAL columns).
+    const pkField = this.primaryKeyName;
+    const pkFieldDef = this.fields[pkField];
+    const skipPK = pkFieldDef && pkFieldDef.autoIncrement;
+    const modelFields = Object.keys(this.fields).filter((f) => {
+      if (skipPK && f === pkField) return false;
+      return true;
+    });
+    const adapterType = dbType;
+    const escapedTable = escapeIdentifier(this.tableName, adapterType);
+    const escapedCols = modelFields.map((c) => escapeIdentifier(c, adapterType)).join(', ');
 
-    const { result } = await this.orm.adapter.execute(sql, flatValues);
-    
-    const startId = result.insertId || 0;
+    // Build prepared values per record, calling prepareValue on each field
+    const preparedRows = records.map((rec) => {
+      const inst = new this(rec); // routes through set() → prepareValue()
+      return modelFields.map((f) => inst.data[f]);
+    });
+
+    let sql;
+    let returnedRows = null;
+
+    if (adapterType === 'postgres') {
+      // Build ($1,$2,...), ($N+1,...) style placeholders + RETURNING
+      const colCount = modelFields.length;
+      const placeholders = preparedRows.map((_, rowIdx) => {
+        const offset = rowIdx * colCount;
+        const ph = modelFields.map((_, cIdx) => `$${offset + cIdx + 1}`).join(', ');
+        return `(${ph})`;
+      }).join(', ');
+      const pkField = this.primaryKeyName;
+      const escapedPK = escapeIdentifier(pkField, adapterType);
+      sql = `INSERT INTO ${escapedTable} (${escapedCols}) VALUES ${placeholders} RETURNING ${escapedPK}`;
+      const flat = preparedRows.flat();
+      const res = await this.orm.adapter.execute(sql, flat);
+      returnedRows = res.rows || [];
+    } else {
+      // MySQL: use ? placeholders, no RETURNING (rely on insertId)
+      const colCount = modelFields.length;
+      const placeholders = preparedRows.map(() =>
+        `(${modelFields.map(() => '?').join(', ')})`
+      ).join(', ');
+      sql = `INSERT INTO ${escapedTable} (${escapedCols}) VALUES ${placeholders}`;
+      const flat = preparedRows.flat();
+      const res = await this.orm.adapter.execute(sql, flat);
+      returnedRows = null;
+      const startId = res.result?.insertId || 0;
+      const affected = res.result?.affectedRows || records.length;
+      // Synthesize returnedRows from contiguous IDs (MySQL guarantee)
+      returnedRows = Array.from({ length: affected }, (_, i) => ({
+        [this.primaryKeyName]: startId + i,
+      }));
+    }
+
+    // Build instances with real IDs
     return records.map((r, i) => {
       const inst = new this(r);
       inst.isNew = false;
-      if (result.insertId) {
-        inst.data.id = startId + i;
+      const row = returnedRows[i];
+      if (row && row[this.primaryKeyName] !== undefined) {
+        inst.data[this.primaryKeyName] = row[this.primaryKeyName];
       }
+      inst._originalData = { ...inst.data };
+      inst._changes.clear();
       return inst;
     });
   }
@@ -3761,18 +4173,23 @@ class Model {
 
     const primaryKey = this.constructor.primaryKeyName;
     const pkValue = this.get(primaryKey);
-    
+
     if (!pkValue) {
       throw new UltraORMError('Cannot delete record without primary key');
     }
 
     const dbType = this.constructor.orm.config.type;
-    
+
     if (dbType === 'mongodb') {
       const col = this.constructor.orm.adapter.client.db(this.constructor.orm.config.database).collection(this.constructor.tableName);
       await col.deleteOne({ _id: this.constructor._convertToObjectIdIfNeeded(primaryKey, pkValue) });
     } else {
-      const sql = `DELETE FROM ${this.constructor.tableName} WHERE ${primaryKey} = ?`;
+      // [FIX v2.1.0 - BUG-13] Escape table & PK identifiers. Original code
+      // interpolated raw ${this.constructor.tableName} and ${primaryKey}.
+      const adapterType = dbType;
+      const escapedTable = escapeIdentifier(this.constructor.tableName, adapterType);
+      const escapedPK = escapeIdentifier(primaryKey, adapterType);
+      const sql = `DELETE FROM ${escapedTable} WHERE ${escapedPK} = ?`;
       await this.constructor.orm.adapter.execute(sql, [pkValue]);
     }
   }
@@ -3877,8 +4294,12 @@ class Model {
       return this._findMongoDB(where, options);
     }
 
+    // [FIX v2.1.0 - BUG-13] Escape table identifier. Original code
+    // interpolated raw ${this.tableName}.
+    const adapterType = this.orm.config.type;
+    const escapedTable = escapeIdentifier(this.tableName, adapterType);
     const select = options.select || '*';
-    let sql = `SELECT ${select} FROM ${this.tableName}`;
+    let sql = `SELECT ${select} FROM ${escapedTable}`;
     const { clause, values } = this._buildWhereClause(where);
     if (clause) sql += ` WHERE ${clause}`;
     if (options.order) sql += ` ORDER BY ${options.order}`;
@@ -3887,7 +4308,7 @@ class Model {
 
     const { rows } = await this.orm.adapter.execute(sql, values);
     return rows.map(row => {
-      const instance = new this(row);
+      const instance = new this(row, { fromDatabase: true });
       instance.isNew = false;
       return instance;
     });
@@ -3926,7 +4347,7 @@ class Model {
 
     const docs = await cursor.toArray();
     return docs.map(d => {
-      const inst = new this(d);
+      const inst = new this(d, { fromDatabase: true });
       inst.isNew = false;
       return inst;
     });
@@ -4143,9 +4564,9 @@ class Model {
         for (const idx of this.indexes || []) {
           await db.collection(this.tableName).createIndex(idx.fields, idx.options || {});
         }
-        console.log(`✅ MongoDB collection ${this.tableName} synced`);
+        console.log(`[OK] MongoDB collection ${this.tableName} synced`);
       } catch (err) {
-        console.error(`❌ Failed to sync collection ${this.tableName}:`, err.message);
+        console.error(`[FAIL] Failed to sync collection ${this.tableName}:`, err.message);
         throw err;
       }
       return;
@@ -4154,6 +4575,30 @@ class Model {
     const fields = [];
     const foreignKeys = [];
     const indexes = [];
+
+    // [FIX v2.1.0 - BUG-02] On Postgres, EnumField must be backed by a named
+    // CREATE TYPE ... AS ENUM (...) statement. The original code emitted
+    // MySQL-style inline `ENUM('a','b')` which Postgres rejects with
+    // `type "enum" does not exist`. We pre-create a named enum type per
+    // (table,column) and rewrite the column type to reference it. The
+    // CREATE TYPE is idempotent via a DO block (Postgres has no
+    // CREATE TYPE IF NOT EXISTS).
+    if (adapterType === 'postgres') {
+      for (const [fieldName, field] of Object.entries(this.fields)) {
+        if (field instanceof EnumField) {
+          const typeName = `${this.tableName}_${fieldName}_enum`;
+          const vals = field.values.map((v) => `'${String(v).replace(/'/g, "''")}'`).join(', ');
+          try {
+            await this.orm.adapter.execute(
+              `DO $$ BEGIN CREATE TYPE ${typeName} AS ENUM (${vals}); EXCEPTION WHEN duplicate_object THEN null; END $$;`
+            );
+          } catch (_e) {
+            // Type may already exist; safe to ignore.
+          }
+          field.dbType = typeName;
+        }
+      }
+    }
 
     for (const [fieldName, field] of Object.entries(this.fields)) {
       if (field instanceof ForeignKey || field instanceof OneToOneField) {
@@ -4178,14 +4623,14 @@ class Model {
     
     try {
       await this.orm.adapter.execute(sql);
-      console.log(`✅ Table ${this.tableName} synced successfully`);
+      console.log(`[OK] Table ${this.tableName} synced successfully`);
 
       // Create additional indexes
       for (const idx of this.indexes || []) {
         await this.orm.adapter.createIndex(this.tableName, idx.fields, idx.options);
       }
     } catch (error) {
-      console.error(`❌ Failed to sync table ${this.tableName}:`, error.message);
+      console.error(`[FAIL] Failed to sync table ${this.tableName}:`, error.message);
       throw error;
     }
   }
@@ -4216,6 +4661,18 @@ class Model {
 
       if (value !== undefined) {
         fields.push(fieldName);
+        // [FIX v2.1.0 - BUG-03 note] We deliberately do NOT call
+        // field.prepareValue() here. The Model constructor routes through
+        // set() which already calls prepareValue() — so this.data[fieldName]
+        // is already in storage form (e.g. MoneyField stores cents as integer).
+        // Calling prepareValue() again here would double-convert
+        // (e.g. 1999 cents → treated as $1999 → 199900 cents).
+        //
+        // The original BUG-03 ("MoneyField silently corrupts values") was
+        // caused by the *original* code path where direct .data[] assignment
+        // bypassed set(). That path is still possible but is documented as
+        // internal — callers using .set() or the constructor are safe.
+        // To force prepareValue on a direct assignment, use model.set().
         values.push(value);
       }
     }
@@ -4223,11 +4680,16 @@ class Model {
     if (fields.length === 0) throw new UltraORMError('No data to insert');
 
     const primaryKeyField = this.constructor.primaryKeyName;
+    const adapterType = this.constructor.orm.config.type;
+    // [FIX v2.1.0 - BUG-13] Escape table & column identifiers in INSERT main path.
+    const escapedTable = escapeIdentifier(this.constructor.tableName, adapterType);
+    const escapedCols = fields.map((f) => escapeIdentifier(f, adapterType)).join(', ');
+    const escapedPK = escapeIdentifier(primaryKeyField, adapterType);
 
     try {
       if (isPostgres) {
         const placeholders = fields.map((_, i) => `$${i + 1}`).join(', ');
-        const sql = `INSERT INTO ${this.constructor.tableName} (${fields.join(',')}) VALUES (${placeholders}) RETURNING ${primaryKeyField}`;
+        const sql = `INSERT INTO ${escapedTable} (${escapedCols}) VALUES (${placeholders}) RETURNING ${escapedPK}`;
         const { rows } = await this.constructor.orm.adapter.execute(sql, values);
         if (rows && rows[0] && rows[0][primaryKeyField] !== undefined) {
           this.data[primaryKeyField] = rows[0][primaryKeyField];
@@ -4246,11 +4708,31 @@ class Model {
       }
       this.isNew = false;
     } catch (err) {
-      // Fallback for non-returning inserts
-      const placeholders = fields.map(() => '?').join(', ');
-      const sql = `INSERT INTO ${this.constructor.tableName} (${fields.join(',')}) VALUES (${placeholders})`;
-      const { result } = await this.constructor.orm.adapter.execute(sql, values);
-      if (result && result.insertId) {
+      // [FIX v2.1.0 - BUG-15] The fallback path used MySQL-style `?`
+      // placeholders unconditionally and did not escape table/column
+      // identifiers. On Postgres this would always fail (the catch block
+      // would re-throw with `syntax error at or near "?"`). The fallback is
+      // only meant for MySQL/MariaDB variants that don't support RETURNING,
+      // but we make it safe for both adapters by building the correct
+      // placeholder form and escaping identifiers.
+      const adapterType = this.constructor.orm.config.type;
+      const escapedTable = escapeIdentifier(this.constructor.tableName, adapterType);
+      const escapedCols = fields.map((f) => escapeIdentifier(f, adapterType)).join(', ');
+      const escapedPK = escapeIdentifier(primaryKeyField, adapterType);
+      let fallbackSql;
+      if (adapterType === 'postgres') {
+        const ph = fields.map((_, i) => `$${i + 1}`).join(', ');
+        fallbackSql = `INSERT INTO ${escapedTable} (${escapedCols}) VALUES (${ph}) RETURNING ${escapedPK}`;
+      } else {
+        const ph = fields.map(() => '?').join(', ');
+        fallbackSql = `INSERT INTO ${escapedTable} (${escapedCols}) VALUES (${ph})`;
+      }
+      const res = await this.constructor.orm.adapter.execute(fallbackSql, values);
+      const result = res.result;
+      const rows = res.rows || [];
+      if (adapterType === 'postgres' && rows[0] && rows[0][primaryKeyField] !== undefined) {
+        this.data[primaryKeyField] = rows[0][primaryKeyField];
+      } else if (result && result.insertId) {
         this.data[primaryKeyField] = result.insertId;
       }
       this.isNew = false;
@@ -4263,20 +4745,54 @@ class Model {
   async update() {
     if (this._changes.size === 0) return;
 
-    const updates = [];
-    const values = [];
-    for (const fieldName of this._changes) {
-      updates.push(`${fieldName} = ?`);
-      values.push(this.data[fieldName]);
-    }
-
+    const adapterType = this.constructor.orm.config.type;
+    const escapedTable = escapeIdentifier(this.constructor.tableName, adapterType);
     const primaryKey = this.constructor.primaryKeyName;
+    const escapedPK = escapeIdentifier(primaryKey, adapterType);
     const pkValue = this._originalData[primaryKey];
-
     if (!pkValue) throw new UltraORMError('No primary key for update');
 
-    const sql = `UPDATE ${this.constructor.tableName} SET ${updates.join(', ')} WHERE ${primaryKey} = ?`;
-    await this.constructor.orm.adapter.execute(sql, [...values, pkValue]);
+    const updates = [];
+    const values = [];
+    let placeholderIdx = 1;
+    for (const fieldName of this._changes) {
+      const escapedName = escapeIdentifier(fieldName, adapterType);
+      // [FIX v2.1.0 - BUG-07] Original update() used MySQL-style `?`
+      // placeholders unconditionally. Postgres needs `$N`. We now build
+      // the right placeholder per adapter.
+      //
+      // [FIX v2.1.0 - BUG-03 note] We deliberately do NOT call
+      // field.prepareValue() here — set() already did it. See insert() for
+      // the full rationale.
+      const rawValue = this.data[fieldName];
+      if (adapterType === 'postgres') {
+        updates.push(`${escapedName} = $${placeholderIdx++}`);
+      } else {
+        updates.push(`${escapedName} = ?`);
+      }
+      values.push(rawValue);
+    }
+
+    if (updates.length === 0) return;
+
+    let sql;
+    if (adapterType === 'postgres') {
+      sql = `UPDATE ${escapedTable} SET ${updates.join(', ')} WHERE ${escapedPK} = $${placeholderIdx}`;
+    } else {
+      sql = `UPDATE ${escapedTable} SET ${updates.join(', ')} WHERE ${escapedPK} = ?`;
+    }
+    values.push(pkValue);
+
+    try {
+      await this.constructor.orm.adapter.execute(sql, values);
+      // [FIX v2.1.0] On success, clear changes so a second .save() without
+      // modifications is a no-op (matches the documented contract).
+      this._changes.clear();
+      this._originalData = { ...this.data };
+    } catch (err) {
+      // Leave _changes intact so caller can retry.
+      throw err;
+    }
   }
 
   // ==================== RELATIONSHIP METHODS ====================
@@ -5256,7 +5772,7 @@ class Model {
     
     try {
       await this.orm.adapter.execute(sql);
-      console.log(`✅ Created junction table: ${through}`);
+      console.log(`[OK] Created junction table: ${through}`);
       
       // Add foreign key constraints if supported
       const dbType = this.orm.config.type;
@@ -5425,7 +5941,7 @@ class UltraORM {
     if (this.connected) return this;
     await this.adapter.connect();
     this.connected = true;
-    console.log('🚀 UltraORM connected successfully');
+    console.log(' UltraORM connected successfully');
     return this;
   }
 
@@ -5436,7 +5952,7 @@ class UltraORM {
     if (!this.connected) return;
     await this.adapter.disconnect();
     this.connected = false;
-    console.log('👋 UltraORM disconnected');
+    console.log(' UltraORM disconnected');
   }
 
   // ==================== MODEL MANAGEMENT ====================
@@ -5505,7 +6021,7 @@ class UltraORM {
    * @returns {Promise<void>}
    */
   async migrate() {
-    console.log('🔄 Starting database migration...');
+    console.log(' Starting database migration...');
     
     // Ensure migrations directory exists
     this._ensureMigrationsDir();
@@ -5514,7 +6030,7 @@ class UltraORM {
       await model.sync();
     }
     
-    console.log('✅ Database migration completed');
+    console.log('[OK] Database migration completed');
   }
 
   /**
@@ -5616,9 +6132,9 @@ module.exports = {
           );
         }
         
-        console.log(`✅ Migration completed: ${file}`);
+        console.log(`[OK] Migration completed: ${file}`);
       } catch (error) {
-        console.error(`❌ Migration failed: ${file}`);
+        console.error(`[FAIL] Migration failed: ${file}`);
         throw error;
       }
     }
@@ -5660,9 +6176,9 @@ module.exports = {
         );
       }
       
-      console.log(`✅ Rollback completed: ${file}`);
+      console.log(`[OK] Rollback completed: ${file}`);
     } catch (error) {
-      console.error(`❌ Rollback failed: ${file}`);
+      console.error(`[FAIL] Rollback failed: ${file}`);
       throw error;
     }
   }
@@ -5671,7 +6187,7 @@ module.exports = {
    * Reset all migrations
    */
   async migrateReset() {
-    console.log('⚠️  Resetting all migrations...');
+    console.log('[!]  Resetting all migrations...');
     
     const migrationsDir = path.join(process.cwd(), 'migrations');
     
@@ -5691,7 +6207,7 @@ module.exports = {
       try {
         await migration.down(this);
       } catch (error) {
-        console.warn(`⚠️  Could not rollback ${file}: ${error.message}`);
+        console.warn(`[!]  Could not rollback ${file}: ${error.message}`);
       }
     }
 
@@ -5704,7 +6220,7 @@ module.exports = {
       }
     }
 
-    console.log('✅ All migrations reset');
+    console.log('[OK] All migrations reset');
   }
 
   /**
@@ -5787,9 +6303,9 @@ module.exports = {
       const seeder = require(path.join(seedersDir, file));
       try {
         await seeder.run(this);
-        console.log(`✅ Seeder completed: ${file}`);
+        console.log(`[OK] Seeder completed: ${file}`);
       } catch (error) {
-        console.error(`❌ Seeder failed: ${file}`);
+        console.error(`[FAIL] Seeder failed: ${file}`);
         throw error;
       }
     }
@@ -5814,7 +6330,7 @@ module.exports = {
           try {
             await seeder.clean(this);
           } catch (e) {
-            console.warn(`⚠️  Could not clean ${file}: ${e.message}`);
+            console.warn(`[!]  Could not clean ${file}: ${e.message}`);
           }
         }
       }
@@ -6031,12 +6547,12 @@ module.exports = {
             }
           }
 
-          console.log(`  ✅ Transferred ${transferred}/${rows.length} rows`);
+          console.log(`  [OK] Transferred ${transferred}/${rows.length} rows`);
           stats.tables[tableName] = { rows: transferred, status: 'success' };
           stats.totalRows += transferred;
 
         } catch (tableError) {
-          console.error(`  ❌ Failed to transfer ${tableName}: ${tableError.message}`);
+          console.error(`  [FAIL] Failed to transfer ${tableName}: ${tableError.message}`);
           stats.tables[tableName] = { rows: 0, status: 'error', error: tableError.message };
           stats.errors.push({ table: tableName, error: tableError.message });
         }
@@ -6100,11 +6616,11 @@ module.exports = {
           
           // Execute on target
           await targetAdapter.execute(createSQL);
-          console.log(`  ✅ Cloned ${tableName}`);
+          console.log(`  [OK] Cloned ${tableName}`);
           stats.tables[tableName] = { status: 'success' };
 
         } catch (tableError) {
-          console.error(`  ❌ Failed to clone ${tableName}: ${tableError.message}`);
+          console.error(`  [FAIL] Failed to clone ${tableName}: ${tableError.message}`);
           stats.tables[tableName] = { status: 'error', error: tableError.message };
           stats.errors.push({ table: tableName, error: tableError.message });
         }
