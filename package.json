@@ -40,12 +40,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/ultraorm"
+    "url": "https://github.com/minjaezekiel/ultraorm"
   },
   "bugs": {
-    "url": "https://github.com/yourusername/ultraorm/issues"
+    "url": "https://github.com/minjaezekiel/ultraorm/issues"
   },
-  "homepage": "https://github.com/yourusername/ultraorm#readme",
+  "homepage": "https://github.com/minjaezekiel/ultraorm#readme",
   "peerDependencies": {},
   "dependencies": {
     "dotenv": "^16.0.0",
